@@ -41,7 +41,8 @@ export default async function MatchExplorerPage({
     fixtures = await getMatchExplorerData({
       date,
       league: params.league,
-      season: params.season
+      season: params.season,
+      timeZone
     });
   } catch (error) {
     runtimeError =

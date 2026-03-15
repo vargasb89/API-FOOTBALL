@@ -11,6 +11,7 @@ import type {
 } from "@/lib/api-football/types";
 import { isTrackedLeague } from "@/lib/competition-scope";
 import { getMainLeagueIds } from "@/lib/config/env";
+import { getFixtureDateInTimeZone, isFixtureWithinDateRange } from "@/lib/timezone";
 import {
   buildProbabilityModel,
   extractBestMarketOffers,
@@ -39,7 +40,7 @@ function sortFixtures(fixtures: FixtureSummary[]) {
   });
 }
 
-export async function getFixturesByDate(date = new Date()) {
+export async function getFixturesByDate(date = new Date(), timeZone?: string) {
   const mainLeagueIds = getMainLeagueIds();
   const formattedDate = format(date, "yyyy-MM-dd");
   const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
@@ -50,11 +51,16 @@ export async function getFixturesByDate(date = new Date()) {
   );
 
   return sortFixtures(
-    payload.response.filter((fixture) =>
-      mainLeagueIds.length
+    payload.response.filter((fixture) => {
+      const matchesLeague = mainLeagueIds.length
         ? mainLeagueIds.includes(fixture.league.id)
-        : isTrackedLeague(fixture.league.country, fixture.league.name)
-    )
+        : isTrackedLeague(fixture.league.country, fixture.league.name);
+      const matchesLocalDate = timeZone
+        ? getFixtureDateInTimeZone(fixture.fixture.date, timeZone) === formattedDate
+        : true;
+
+      return matchesLeague && matchesLocalDate;
+    })
   );
 }
 
@@ -219,6 +225,7 @@ export async function getMatchExplorerData(filters: {
   date: string;
   league?: string;
   season?: string;
+  timeZone?: string;
 }) {
   const params: Record<string, string> = {
     date: filters.date
@@ -238,8 +245,11 @@ export async function getMatchExplorerData(filters: {
   );
 
   return sortFixtures(
-    payload.response.filter((fixture) =>
-      isTrackedLeague(fixture.league.country, fixture.league.name)
+    payload.response.filter(
+      (fixture) =>
+        isTrackedLeague(fixture.league.country, fixture.league.name) &&
+        (!filters.timeZone ||
+          getFixtureDateInTimeZone(fixture.fixture.date, filters.timeZone) === filters.date)
     )
   );
 }
@@ -256,8 +266,8 @@ export async function getTeamPageData(teamId: number, league: number, season: nu
   };
 }
 
-export async function getDashboardInsights() {
-  const fixtures = await getFixturesByDate();
+export async function getDashboardInsights(timeZone?: string) {
+  const fixtures = await getFixturesByDate(new Date(), timeZone);
   const topFixtures = fixtures.slice(0, 8);
 
   const opportunities = await Promise.all(
@@ -276,8 +286,8 @@ export async function getDashboardInsights() {
   };
 }
 
-export async function getTopEdgesByMarket(date = new Date()) {
-  const fixtures = await getFixturesByDate(date);
+export async function getTopEdgesByMarket(date = new Date(), timeZone?: string) {
+  const fixtures = await getFixturesByDate(date, timeZone);
   const contexts = await Promise.all(
     fixtures.slice(0, 10).map(async (fixture) => ({
       fixture,
@@ -303,12 +313,34 @@ type MarketQuery = {
   endDate: Date;
   minOdds?: number;
   maxOdds?: number;
+  timeZone?: string;
 };
 
-async function getMarketEntries({ startDate, endDate, minOdds, maxOdds }: MarketQuery) {
+async function getMarketEntries({
+  startDate,
+  endDate,
+  minOdds,
+  maxOdds,
+  timeZone
+}: MarketQuery) {
   const dates = enumerateDates(startDate, endDate);
-  const fixturesByDay = await Promise.all(dates.map((date) => getFixturesByDate(date)));
-  const fixtures = sortFixtures(fixturesByDay.flat()).slice(0, 40);
+  const fixturesByDay = await Promise.all(dates.map((date) => getFixturesByDate(date, timeZone)));
+  const startDateKey = format(startDate, "yyyy-MM-dd");
+  const endDateKey = format(endDate, "yyyy-MM-dd");
+  const fixtures = sortFixtures(
+    fixturesByDay
+      .flat()
+      .filter((fixture) =>
+        timeZone
+          ? isFixtureWithinDateRange(
+              fixture.fixture.date,
+              timeZone,
+              startDateKey,
+              endDateKey
+            )
+          : true
+      )
+  ).slice(0, 40);
   const contexts = await Promise.all(
     fixtures.map(async (fixture) => ({
       fixture,

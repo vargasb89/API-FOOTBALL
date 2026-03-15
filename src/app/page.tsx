@@ -18,7 +18,7 @@ export default async function HomePage() {
   let runtimeError: string | null = null;
 
   try {
-    const dashboard = await getDashboardInsights();
+    const dashboard = await getDashboardInsights(timeZone);
     fixtures = dashboard.fixtures;
     opportunities = dashboard.opportunities;
   } catch (error) {

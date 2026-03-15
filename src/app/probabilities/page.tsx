@@ -39,7 +39,8 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
       startDate: new Date(`${start}T12:00:00`),
       endDate: new Date(`${end}T12:00:00`),
       minOdds,
-      maxOdds
+      maxOdds,
+      timeZone
     });
   } catch (error) {
     runtimeError =

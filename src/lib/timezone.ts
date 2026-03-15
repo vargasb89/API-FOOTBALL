@@ -27,6 +27,20 @@ export function getDateInputValueInTimeZone(date: Date, timeZone: string) {
   return formatter.format(date);
 }
 
+export function getFixtureDateInTimeZone(date: string, timeZone: string) {
+  return getDateInputValueInTimeZone(new Date(date), timeZone);
+}
+
+export function isFixtureWithinDateRange(
+  date: string,
+  timeZone: string,
+  startDate: string,
+  endDate: string
+) {
+  const localDate = getFixtureDateInTimeZone(date, timeZone);
+  return localDate >= startDate && localDate <= endDate;
+}
+
 export function formatMatchDateTime(date: string, timeZone: string) {
   return new Intl.DateTimeFormat("es-CO", {
     timeZone,
