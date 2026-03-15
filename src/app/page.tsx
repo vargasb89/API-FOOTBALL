@@ -6,11 +6,13 @@ import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getDashboardInsights } from "@/lib/api-football/service";
 import { getLeagueGroups, TRACKED_LEAGUES } from "@/lib/competition-scope";
+import { formatMatchTime, getRequestTimeZone } from "@/lib/timezone";
 import { formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const timeZone = await getRequestTimeZone();
   let fixtures: Awaited<ReturnType<typeof getDashboardInsights>>["fixtures"] = [];
   let opportunities: Awaited<ReturnType<typeof getDashboardInsights>>["opportunities"] = [];
   let runtimeError: string | null = null;
@@ -136,10 +138,7 @@ export default async function HomePage() {
               </div>
               <div className="flex items-center gap-4">
                 <span className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-300">
-                  {new Date(fixture.fixture.date).toLocaleTimeString("es-CO", {
-                    hour: "2-digit",
-                    minute: "2-digit"
-                  })}
+                  {formatMatchTime(fixture.fixture.date, timeZone)}
                 </span>
                 <Link
                   href={`/matches/${fixture.fixture.id}`}

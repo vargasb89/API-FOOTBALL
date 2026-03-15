@@ -26,6 +26,19 @@ const MARKET_WHITELIST = new Set([
   "Away Team Over/Under"
 ]);
 
+function sortFixtures(fixtures: FixtureSummary[]) {
+  return [...fixtures].sort((left, right) => {
+    const dateDelta =
+      new Date(left.fixture.date).getTime() - new Date(right.fixture.date).getTime();
+
+    if (dateDelta !== 0) {
+      return dateDelta;
+    }
+
+    return left.fixture.id - right.fixture.id;
+  });
+}
+
 export async function getFixturesByDate(date = new Date()) {
   const mainLeagueIds = getMainLeagueIds();
   const formattedDate = format(date, "yyyy-MM-dd");
@@ -36,10 +49,12 @@ export async function getFixturesByDate(date = new Date()) {
     }
   );
 
-  return payload.response.filter((fixture) =>
-    mainLeagueIds.length
-      ? mainLeagueIds.includes(fixture.league.id)
-      : isTrackedLeague(fixture.league.country, fixture.league.name)
+  return sortFixtures(
+    payload.response.filter((fixture) =>
+      mainLeagueIds.length
+        ? mainLeagueIds.includes(fixture.league.id)
+        : isTrackedLeague(fixture.league.country, fixture.league.name)
+    )
   );
 }
 
@@ -111,7 +126,7 @@ export async function getRecentTeamFixtures(
     300
   );
 
-  return payload.response;
+  return sortFixtures(payload.response);
 }
 
 export async function getFixtureContext(fixtureId: number) {
@@ -222,8 +237,10 @@ export async function getMatchExplorerData(filters: {
     params
   );
 
-  return payload.response.filter((fixture) =>
-    isTrackedLeague(fixture.league.country, fixture.league.name)
+  return sortFixtures(
+    payload.response.filter((fixture) =>
+      isTrackedLeague(fixture.league.country, fixture.league.name)
+    )
   );
 }
 
@@ -291,7 +308,7 @@ type MarketQuery = {
 async function getMarketEntries({ startDate, endDate, minOdds, maxOdds }: MarketQuery) {
   const dates = enumerateDates(startDate, endDate);
   const fixturesByDay = await Promise.all(dates.map((date) => getFixturesByDate(date)));
-  const fixtures = fixturesByDay.flat().slice(0, 40);
+  const fixtures = sortFixtures(fixturesByDay.flat()).slice(0, 40);
   const contexts = await Promise.all(
     fixtures.map(async (fixture) => ({
       fixture,

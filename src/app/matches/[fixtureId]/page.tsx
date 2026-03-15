@@ -5,6 +5,7 @@ import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getFixtureContext } from "@/lib/api-football/service";
+import { formatMatchDateTime, getRequestTimeZone } from "@/lib/timezone";
 import { formatOdds, formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ type MatchDetailPageProps = {
 
 export default async function MatchDetailPage({ params }: MatchDetailPageProps) {
   const { fixtureId } = await params;
+  const timeZone = await getRequestTimeZone();
   let context: Awaited<ReturnType<typeof getFixtureContext>> | null = null;
   let runtimeError: string | null = null;
 
@@ -63,7 +65,7 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
             <Metric label="Estado" value={context.fixture.fixture.status.short} />
             <Metric
               label="Hora"
-              value={new Date(context.fixture.fixture.date).toLocaleString("es-CO")}
+              value={formatMatchDateTime(context.fixture.fixture.date, timeZone)}
             />
             <Metric label="Bookmakers" value={String(context.bookmakers.length)} />
             <Metric label="Mercados comparados" value={String(context.marketOffers.length)} />

@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import Link from "next/link";
 
 import { MatchesFiltersForm } from "@/components/filters/matches-filters-form";
@@ -11,6 +10,11 @@ import {
   getLeagueGroups,
   type LeagueCategory
 } from "@/lib/competition-scope";
+import {
+  formatMatchTime,
+  getDateInputValueInTimeZone,
+  getRequestTimeZone
+} from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +32,8 @@ export default async function MatchExplorerPage({
   searchParams
 }: MatchExplorerPageProps) {
   const params = await searchParams;
-  const date = params.date ?? format(new Date(), "yyyy-MM-dd");
+  const timeZone = await getRequestTimeZone();
+  const date = params.date ?? getDateInputValueInTimeZone(new Date(), timeZone);
   let fixtures: Awaited<ReturnType<typeof getMatchExplorerData>> = [];
   let runtimeError: string | null = null;
 
@@ -65,6 +70,7 @@ export default async function MatchExplorerPage({
 
       <Card>
         <MatchesFiltersForm
+          key={`matches-${date}-${params.league ?? ""}-${params.country ?? ""}-${params.category ?? ""}-${params.season ?? ""}`}
           date={date}
           league={params.league ?? ""}
           country={params.country ?? ""}
@@ -102,12 +108,8 @@ export default async function MatchExplorerPage({
                     {fixture.teams.home.name} vs {fixture.teams.away.name}
                   </h3>
                   <p className="text-sm text-slate-300">
-                    Hora{" "}
-                    {new Date(fixture.fixture.date).toLocaleTimeString("es-CO", {
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}{" "}
-                    • Estado {fixture.fixture.status.short}
+                    Hora {formatMatchTime(fixture.fixture.date, timeZone)} • Estado{" "}
+                    {fixture.fixture.status.short}
                   </p>
                   {trackedLeague ? (
                     <div className="flex flex-wrap gap-2 pt-1">

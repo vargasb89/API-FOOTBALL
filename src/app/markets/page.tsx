@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import Link from "next/link";
 
 import { MarketFiltersForm } from "@/components/filters/market-filters-form";
@@ -7,6 +6,11 @@ import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getTopEdgesByMarketRange } from "@/lib/api-football/service";
+import {
+  formatMatchDateTime,
+  getDateInputValueInTimeZone,
+  getRequestTimeZone
+} from "@/lib/timezone";
 import { formatOdds, formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +26,8 @@ type MarketEdgesPageProps = {
 
 export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageProps) {
   const params = await searchParams;
-  const start = params.start ?? format(new Date(), "yyyy-MM-dd");
+  const timeZone = await getRequestTimeZone();
+  const start = params.start ?? getDateInputValueInTimeZone(new Date(), timeZone);
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
@@ -51,6 +56,7 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
 
       <Card>
         <MarketFiltersForm
+          key={`markets-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}`}
           start={start}
           end={end}
           minOdds={params.min_odds ?? ""}
@@ -90,6 +96,7 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
                     emphasis={`Edge ${formatPercent(offer.edge)}`}
                     detailLabel="Confianza"
                     detailValue={getConfidenceLabel(offer.confidence)}
+                    timeZone={timeZone}
                   />
                 ))
               ) : (
@@ -108,7 +115,8 @@ function RankCard({
   offer,
   emphasis,
   detailLabel,
-  detailValue
+  detailValue,
+  timeZone
 }: {
   fixture: {
     fixture: { id: number; date: string };
@@ -125,6 +133,7 @@ function RankCard({
   emphasis: string;
   detailLabel: string;
   detailValue: string;
+  timeZone: string;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
@@ -136,7 +145,7 @@ function RankCard({
           </h3>
           <p className="mt-1 text-xs text-slate-400">{offer.bookmaker}</p>
           <p className="mt-1 text-xs text-slate-500">
-            {new Date(fixture.fixture.date).toLocaleString("es-CO")}
+            {formatMatchDateTime(fixture.fixture.date, timeZone)}
           </p>
         </div>
         <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-medium text-emerald-200">

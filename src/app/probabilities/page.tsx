@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import Link from "next/link";
 
 import { MarketFiltersForm } from "@/components/filters/market-filters-form";
@@ -7,6 +6,11 @@ import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getTopModelProbabilitiesByMarketRange } from "@/lib/api-football/service";
+import {
+  formatMatchDateTime,
+  getDateInputValueInTimeZone,
+  getRequestTimeZone
+} from "@/lib/timezone";
 import { formatPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +26,8 @@ type ProbabilityPageProps = {
 
 export default async function ProbabilityPage({ searchParams }: ProbabilityPageProps) {
   const params = await searchParams;
-  const start = params.start ?? format(new Date(), "yyyy-MM-dd");
+  const timeZone = await getRequestTimeZone();
+  const start = params.start ?? getDateInputValueInTimeZone(new Date(), timeZone);
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
@@ -53,6 +58,7 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
 
       <Card>
         <MarketFiltersForm
+          key={`probabilities-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}`}
           start={start}
           end={end}
           minOdds={params.min_odds ?? ""}
@@ -97,7 +103,7 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
                         </h3>
                         <p className="mt-1 text-xs text-slate-400">{offer.bookmaker}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {new Date(fixture.fixture.date).toLocaleString("es-CO")}
+                          {formatMatchDateTime(fixture.fixture.date, timeZone)}
                         </p>
                       </div>
                       <span className="rounded-full bg-sky-400/15 px-3 py-1 text-xs font-medium text-sky-200">
