@@ -117,6 +117,37 @@ function filterEntriesByOdds(
   });
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function filterEntriesByMatchQuery(
+  entries: MarketLeaderboardEntry[],
+  matchQuery?: string
+) {
+  if (!matchQuery?.trim()) {
+    return entries;
+  }
+
+  const queryTokens = normalizeSearchValue(matchQuery)
+    .split(" ")
+    .filter(Boolean);
+
+  return entries.filter(({ fixture }) => {
+    const haystack = normalizeSearchValue(
+      `${fixture.teams.home.name} ${fixture.teams.away.name} ${fixture.league.name}`
+    );
+
+    return queryTokens.every((token) => haystack.includes(token));
+  });
+}
+
 export async function getLeagueStandings(league: number, season: number) {
   const payload = await apiFootballGet<
     ApiFootballEnvelope<Array<{ league: { standings: StandingRow[][] } }>>
@@ -337,6 +368,7 @@ type MarketQuery = {
   minOdds?: number;
   maxOdds?: number;
   timeZone?: string;
+  matchQuery?: string;
 };
 
 async function getMarketEntries({
@@ -344,7 +376,8 @@ async function getMarketEntries({
   endDate,
   minOdds,
   maxOdds,
-  timeZone
+  timeZone,
+  matchQuery
 }: MarketQuery) {
   const dates = enumerateDates(startDate, endDate);
   const fixturesByDay = await Promise.all(dates.map((date) => getFixturesByDate(date, timeZone)));
@@ -378,7 +411,10 @@ async function getMarketEntries({
     }))
   );
 
-  return filterEntriesByOdds(entries, minOdds, maxOdds);
+  return filterEntriesByMatchQuery(
+    filterEntriesByOdds(entries, minOdds, maxOdds),
+    matchQuery
+  );
 }
 
 export async function getTopEdgesByMarketRange(query: MarketQuery) {

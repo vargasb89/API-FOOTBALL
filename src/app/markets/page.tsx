@@ -21,6 +21,7 @@ type MarketEdgesPageProps = {
     end?: string;
     min_odds?: string;
     max_odds?: string;
+    q?: string;
   }>;
 };
 
@@ -31,6 +32,7 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
+  const matchQuery = params.q ?? "";
   let groups: Awaited<ReturnType<typeof getTopEdgesByMarketRange>> = [];
   let runtimeError: string | null = null;
 
@@ -40,7 +42,8 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
       endDate: new Date(`${end}T12:00:00`),
       minOdds,
       maxOdds,
-      timeZone
+      timeZone,
+      matchQuery
     });
   } catch (error) {
     runtimeError =
@@ -52,16 +55,17 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
       <SectionTitle
         eyebrow="Edges por mercado"
         title="Partidos con mayor edge dentro de cada mercado objetivo"
-        description="Ranking filtrable por rango de fechas y cuotas. Solo aparecen edges positivos calculados con el modelo refinado."
+        description="Ranking filtrable por rango de fechas, cuotas y partido. Solo aparecen edges positivos calculados con el modelo refinado."
       />
 
       <Card>
         <MarketFiltersForm
-          key={`markets-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}`}
+          key={`markets-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}-${matchQuery}`}
           start={start}
           end={end}
           minOdds={params.min_odds ?? ""}
           maxOdds={params.max_odds ?? ""}
+          matchQuery={matchQuery}
         />
       </Card>
 

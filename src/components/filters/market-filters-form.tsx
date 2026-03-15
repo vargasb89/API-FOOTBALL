@@ -8,13 +8,15 @@ type MarketFiltersFormProps = {
   end: string;
   minOdds: string;
   maxOdds: string;
+  matchQuery: string;
 };
 
 export function MarketFiltersForm({
   start,
   end,
   minOdds,
-  maxOdds
+  maxOdds,
+  matchQuery
 }: MarketFiltersFormProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -24,7 +26,8 @@ export function MarketFiltersForm({
     start,
     end,
     minOdds,
-    maxOdds
+    maxOdds,
+    matchQuery
   });
 
   function updateField(field: keyof typeof form, value: string) {
@@ -43,12 +46,13 @@ export function MarketFiltersForm({
     syncParam(params, "end", form.end);
     syncParam(params, "min_odds", form.minOdds);
     syncParam(params, "max_odds", form.maxOdds);
+    syncParam(params, "q", form.matchQuery);
 
     router.push(`${pathname}?${params.toString()}`);
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-4 xl:grid-cols-5">
+    <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
       <Field label="Desde">
         <input
           name="start"
@@ -84,6 +88,15 @@ export function MarketFiltersForm({
           step="0.01"
           value={form.maxOdds}
           onChange={(event) => updateField("maxOdds", event.target.value)}
+          className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white"
+        />
+      </Field>
+      <Field label="Partido">
+        <input
+          name="q"
+          value={form.matchQuery}
+          onChange={(event) => updateField("matchQuery", event.target.value)}
+          placeholder="Mallorca Espanyol"
           className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white"
         />
       </Field>

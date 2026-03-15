@@ -21,6 +21,7 @@ type ProbabilityPageProps = {
     end?: string;
     min_odds?: string;
     max_odds?: string;
+    q?: string;
   }>;
 };
 
@@ -31,6 +32,7 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
+  const matchQuery = params.q ?? "";
   let groups: Awaited<ReturnType<typeof getTopModelProbabilitiesByMarketRange>> = [];
   let runtimeError: string | null = null;
 
@@ -40,7 +42,8 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
       endDate: new Date(`${end}T12:00:00`),
       minOdds,
       maxOdds,
-      timeZone
+      timeZone,
+      matchQuery
     });
   } catch (error) {
     runtimeError =
@@ -54,16 +57,17 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
       <SectionTitle
         eyebrow="Probabilidades"
         title="Mercados con mayor probabilidad del modelo"
-        description="Esta vista ordena por probabilidad modelada aunque no exista edge positivo. Sirve para detectar spots fuertes del modelo y luego revisar si el mercado acompana."
+        description="Esta vista ordena por probabilidad modelada aunque no exista edge positivo. Puedes filtrar por rango, cuotas y partido concreto."
       />
 
       <Card>
         <MarketFiltersForm
-          key={`probabilities-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}`}
+          key={`probabilities-${start}-${end}-${params.min_odds ?? ""}-${params.max_odds ?? ""}-${matchQuery}`}
           start={start}
           end={end}
           minOdds={params.min_odds ?? ""}
           maxOdds={params.max_odds ?? ""}
+          matchQuery={matchQuery}
         />
       </Card>
 
