@@ -9,14 +9,12 @@ import type {
 } from "@/lib/api-football/types";
 import { isTrackedLeague } from "@/lib/competition-scope";
 import { getMainLeagueIds } from "@/lib/config/env";
-import { queryDb } from "@/lib/db";
 import {
   getDateInputValueInTimeZone,
   getDefaultTimeZone,
   getFixtureDateInTimeZone,
   shiftDateKey
 } from "@/lib/timezone";
-import { getRedis } from "@/lib/redis";
 import {
   buildProbabilityModel,
   extractBestMarketOffers,
@@ -32,14 +30,6 @@ const MARKET_WHITELIST = new Set([
   "Away Team Over/Under"
 ]);
 const MARKET_GROUP_LIMIT = 10;
-const MARKET_SNAPSHOT_TTL_SECONDS = 90;
-
-type SnapshotCacheEntry = {
-  expiresAt: number;
-  value: MarketLeaderboardEntry[];
-};
-
-const marketSnapshotCache = new Map<string, SnapshotCacheEntry>();
 
 function sortFixtures(fixtures: FixtureSummary[]) {
   return [...fixtures].sort((left, right) => {
@@ -62,89 +52,6 @@ function dedupeFixtures(fixtures: FixtureSummary[]) {
   }
 
   return [...unique.values()];
-}
-
-function buildMarketSnapshotKey({
-  startDateKey,
-  endDateKey,
-  minOdds,
-  maxOdds,
-  timeZone
-}: MarketQuery) {
-  const params = new URLSearchParams({
-    start: startDateKey,
-    end: endDateKey,
-    timeZone: timeZone ?? getDefaultTimeZone()
-  });
-
-  if (typeof minOdds === "number") {
-    params.set("minOdds", String(minOdds));
-  }
-
-  if (typeof maxOdds === "number") {
-    params.set("maxOdds", String(maxOdds));
-  }
-
-  return `market-snapshot:${params.toString()}`;
-}
-
-async function readMarketSnapshot(cacheKey: string) {
-  const inMemory = marketSnapshotCache.get(cacheKey);
-
-  if (inMemory && inMemory.expiresAt > Date.now()) {
-    return inMemory.value;
-  }
-
-  const redis = getRedis();
-  if (redis) {
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      const parsed = JSON.parse(cached) as MarketLeaderboardEntry[];
-      marketSnapshotCache.set(cacheKey, {
-        value: parsed,
-        expiresAt: Date.now() + MARKET_SNAPSHOT_TTL_SECONDS * 1000
-      });
-      return parsed;
-    }
-  }
-
-  const rows = await queryDb<{ response_json: MarketLeaderboardEntry[] }>(
-    "select response_json from api_cache where cache_key = $1 and expires_at > now()",
-    [cacheKey]
-  );
-
-  const value = rows?.[0]?.response_json ?? null;
-
-  if (value) {
-    marketSnapshotCache.set(cacheKey, {
-      value,
-      expiresAt: Date.now() + MARKET_SNAPSHOT_TTL_SECONDS * 1000
-    });
-  }
-
-  return value;
-}
-
-async function writeMarketSnapshot(cacheKey: string, value: MarketLeaderboardEntry[]) {
-  marketSnapshotCache.set(cacheKey, {
-    value,
-    expiresAt: Date.now() + MARKET_SNAPSHOT_TTL_SECONDS * 1000
-  });
-
-  const redis = getRedis();
-  if (redis) {
-    await redis.set(cacheKey, JSON.stringify(value), "EX", MARKET_SNAPSHOT_TTL_SECONDS);
-  }
-
-  await queryDb(
-    `insert into api_cache (cache_key, response_json, expires_at, updated_at)
-     values ($1, $2::jsonb, now() + ($3 || ' seconds')::interval, now())
-     on conflict (cache_key)
-     do update set response_json = excluded.response_json,
-                   expires_at = excluded.expires_at,
-                   updated_at = now()`,
-    [cacheKey, JSON.stringify(value), MARKET_SNAPSHOT_TTL_SECONDS]
-  );
 }
 
 async function fetchFixturesForApiDate(dateKey: string) {
@@ -452,19 +359,6 @@ async function getMarketEntries({
   maxOdds,
   timeZone
 }: MarketQuery) {
-  const cacheKey = buildMarketSnapshotKey({
-    startDateKey,
-    endDateKey,
-    minOdds,
-    maxOdds,
-    timeZone
-  });
-  const cachedSnapshot = await readMarketSnapshot(cacheKey);
-
-  if (cachedSnapshot) {
-    return cachedSnapshot;
-  }
-
   const dates = enumerateDateKeys(startDateKey, endDateKey);
   const fixturesByDay = await Promise.all(
     dates.map((dateKey) => getFixturesByDate(dateKey, timeZone))
@@ -484,10 +378,7 @@ async function getMarketEntries({
     }))
   );
 
-  const filteredEntries = filterEntriesByOdds(entries, minOdds, maxOdds);
-  await writeMarketSnapshot(cacheKey, filteredEntries);
-
-  return filteredEntries;
+  return filterEntriesByOdds(entries, minOdds, maxOdds);
 }
 
 export async function getTopEdgesByMarketRange(query: MarketQuery) {
