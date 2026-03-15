@@ -40,8 +40,23 @@ function sortFixtures(fixtures: FixtureSummary[]) {
   });
 }
 
-export async function getFixturesByDate(date = new Date(), timeZone?: string) {
-  const mainLeagueIds = getMainLeagueIds();
+function dedupeFixtures(fixtures: FixtureSummary[]) {
+  const unique = new Map<number, FixtureSummary>();
+
+  for (const fixture of fixtures) {
+    unique.set(fixture.fixture.id, fixture);
+  }
+
+  return [...unique.values()];
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+async function fetchFixturesForApiDate(date: Date) {
   const formattedDate = format(date, "yyyy-MM-dd");
   const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
     "/fixtures",
@@ -50,8 +65,18 @@ export async function getFixturesByDate(date = new Date(), timeZone?: string) {
     }
   );
 
+  return payload.response;
+}
+
+export async function getFixturesByDate(date = new Date(), timeZone?: string) {
+  const mainLeagueIds = getMainLeagueIds();
+  const formattedDate = format(date, "yyyy-MM-dd");
+  const apiDates = timeZone ? [addDays(date, -1), date, addDays(date, 1)] : [date];
+  const payloads = await Promise.all(apiDates.map((apiDate) => fetchFixturesForApiDate(apiDate)));
+  const fixtures = dedupeFixtures(payloads.flat());
+
   return sortFixtures(
-    payload.response.filter((fixture) => {
+    fixtures.filter((fixture) => {
       const matchesLeague = mainLeagueIds.length
         ? mainLeagueIds.includes(fixture.league.id)
         : isTrackedLeague(fixture.league.country, fixture.league.name);
@@ -227,25 +252,23 @@ export async function getMatchExplorerData(filters: {
   season?: string;
   timeZone?: string;
 }) {
-  const params: Record<string, string> = {
-    date: filters.date
-  };
-
-  if (filters.league) {
-    params.league = filters.league;
-  }
-
-  if (filters.season) {
-    params.season = filters.season;
-  }
-
-  const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
-    "/fixtures",
-    params
+  const targetDate = new Date(`${filters.date}T12:00:00`);
+  const apiDates = filters.timeZone
+    ? [addDays(targetDate, -1), targetDate, addDays(targetDate, 1)]
+    : [targetDate];
+  const payloads = await Promise.all(
+    apiDates.map((apiDate) =>
+      apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>("/fixtures", {
+        date: format(apiDate, "yyyy-MM-dd"),
+        ...(filters.league ? { league: filters.league } : {}),
+        ...(filters.season ? { season: filters.season } : {})
+      })
+    )
   );
+  const fixtures = dedupeFixtures(payloads.flatMap((payload) => payload.response));
 
   return sortFixtures(
-    payload.response.filter(
+    fixtures.filter(
       (fixture) =>
         isTrackedLeague(fixture.league.country, fixture.league.name) &&
         (!filters.timeZone ||
