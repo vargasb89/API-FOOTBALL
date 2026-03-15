@@ -26,6 +26,7 @@ const MARKET_WHITELIST = new Set([
   "Home Team Over/Under",
   "Away Team Over/Under"
 ]);
+const MARKET_GROUP_LIMIT = 10;
 
 function sortFixtures(fixtures: FixtureSummary[]) {
   return [...fixtures].sort((left, right) => {
@@ -358,7 +359,7 @@ export async function getTopEdgesByMarket(date = new Date(), timeZone?: string) 
 
   return groupOffersByMarket(entries).map((group) => ({
     ...group,
-    entries: group.entries.slice(0, 5)
+    entries: group.entries.slice(0, MARKET_GROUP_LIMIT)
   }));
 }
 
@@ -421,7 +422,7 @@ export async function getTopEdgesByMarketRange(query: MarketQuery) {
   const entries = await getMarketEntries(query);
   return groupOffersByMarket(entries).map((group) => ({
     ...group,
-    entries: group.entries.slice(0, 5)
+    entries: group.entries.slice(0, MARKET_GROUP_LIMIT)
   }));
 }
 
@@ -430,6 +431,6 @@ export async function getTopModelProbabilitiesByMarketRange(query: MarketQuery) 
 
   return groupModelProbabilitiesByMarket(entries).map((group) => ({
     ...group,
-    entries: group.entries.slice(0, 5)
+    entries: group.entries.slice(0, MARKET_GROUP_LIMIT)
   }));
 }
