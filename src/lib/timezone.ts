@@ -23,8 +23,16 @@ export function getDateInputValueInTimeZone(date: Date, timeZone: string) {
     month: "2-digit",
     day: "2-digit"
   });
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
 
-  return formatter.format(date);
+  if (!year || !month || !day) {
+    throw new Error(`Could not derive local date for timezone ${timeZone}`);
+  }
+
+  return `${year}-${month}-${day}`;
 }
 
 export function getFixtureDateInTimeZone(date: string, timeZone: string) {
