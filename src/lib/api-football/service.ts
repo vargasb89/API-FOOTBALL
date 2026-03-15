@@ -1,5 +1,3 @@
-import { format } from "date-fns";
-
 import { apiFootballGet } from "@/lib/api-football/client";
 import type {
   ApiFootballEnvelope,
@@ -11,7 +9,12 @@ import type {
 } from "@/lib/api-football/types";
 import { isTrackedLeague } from "@/lib/competition-scope";
 import { getMainLeagueIds } from "@/lib/config/env";
-import { getFixtureDateInTimeZone, isFixtureWithinDateRange } from "@/lib/timezone";
+import {
+  getDateInputValueInTimeZone,
+  getDefaultTimeZone,
+  getFixtureDateInTimeZone,
+  shiftDateKey
+} from "@/lib/timezone";
 import {
   buildProbabilityModel,
   extractBestMarketOffers,
@@ -51,29 +54,38 @@ function dedupeFixtures(fixtures: FixtureSummary[]) {
   return [...unique.values()];
 }
 
-function addDays(date: Date, days: number) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
-async function fetchFixturesForApiDate(date: Date) {
-  const formattedDate = format(date, "yyyy-MM-dd");
+async function fetchFixturesForApiDate(dateKey: string) {
   const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
     "/fixtures",
     {
-      date: formattedDate
+      date: dateKey
     }
   );
 
   return payload.response;
 }
 
-export async function getFixturesByDate(date = new Date(), timeZone?: string) {
+function getApiDateKeysForLocalDate(dateKey: string, timeZone?: string) {
+  if (!timeZone) {
+    return [dateKey];
+  }
+
+  return [shiftDateKey(dateKey, -1), dateKey, shiftDateKey(dateKey, 1)];
+}
+
+function isActionableFixture(fixture: FixtureSummary) {
+  const status = fixture.fixture.status.short;
+
+  return !["FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO", "PST"].includes(status);
+}
+
+export async function getFixturesByDate(dateKey: string, timeZone?: string) {
   const mainLeagueIds = getMainLeagueIds();
-  const formattedDate = format(date, "yyyy-MM-dd");
-  const apiDates = timeZone ? [addDays(date, -1), date, addDays(date, 1)] : [date];
-  const payloads = await Promise.all(apiDates.map((apiDate) => fetchFixturesForApiDate(apiDate)));
+  const resolvedTimeZone = timeZone ?? getDefaultTimeZone();
+  const apiDateKeys = getApiDateKeysForLocalDate(dateKey, resolvedTimeZone);
+  const payloads = await Promise.all(
+    apiDateKeys.map((apiDateKey) => fetchFixturesForApiDate(apiDateKey))
+  );
   const fixtures = dedupeFixtures(payloads.flat());
 
   return sortFixtures(
@@ -81,25 +93,23 @@ export async function getFixturesByDate(date = new Date(), timeZone?: string) {
       const matchesLeague = mainLeagueIds.length
         ? mainLeagueIds.includes(fixture.league.id)
         : isTrackedLeague(fixture.league.country, fixture.league.name);
-      const matchesLocalDate = timeZone
-        ? getFixtureDateInTimeZone(fixture.fixture.date, timeZone) === formattedDate
+      const matchesLocalDate = resolvedTimeZone
+        ? getFixtureDateInTimeZone(fixture.fixture.date, resolvedTimeZone) === dateKey
         : true;
+      const matchesStatus = isActionableFixture(fixture);
 
-      return matchesLeague && matchesLocalDate;
+      return matchesLeague && matchesLocalDate && matchesStatus;
     })
   );
 }
 
-function enumerateDates(start: Date, end: Date) {
-  const dates: Date[] = [];
-  const current = new Date(start);
-  current.setHours(12, 0, 0, 0);
-  const limit = new Date(end);
-  limit.setHours(12, 0, 0, 0);
+function enumerateDateKeys(startDateKey: string, endDateKey: string) {
+  const dates: string[] = [];
+  let current = startDateKey;
 
-  while (current <= limit) {
-    dates.push(new Date(current));
-    current.setDate(current.getDate() + 1);
+  while (current <= endDateKey) {
+    dates.push(current);
+    current = shiftDateKey(current, 1);
   }
 
   return dates;
@@ -253,14 +263,11 @@ export async function getMatchExplorerData(filters: {
   season?: string;
   timeZone?: string;
 }) {
-  const targetDate = new Date(`${filters.date}T12:00:00`);
-  const apiDates = filters.timeZone
-    ? [addDays(targetDate, -1), targetDate, addDays(targetDate, 1)]
-    : [targetDate];
+  const apiDates = getApiDateKeysForLocalDate(filters.date, filters.timeZone);
   const payloads = await Promise.all(
     apiDates.map((apiDate) =>
       apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>("/fixtures", {
-        date: format(apiDate, "yyyy-MM-dd"),
+        date: apiDate,
         ...(filters.league ? { league: filters.league } : {}),
         ...(filters.season ? { season: filters.season } : {})
       })
@@ -272,6 +279,7 @@ export async function getMatchExplorerData(filters: {
     fixtures.filter(
       (fixture) =>
         isTrackedLeague(fixture.league.country, fixture.league.name) &&
+        isActionableFixture(fixture) &&
         (!filters.timeZone ||
           getFixtureDateInTimeZone(fixture.fixture.date, filters.timeZone) === filters.date)
     )
@@ -291,7 +299,9 @@ export async function getTeamPageData(teamId: number, league: number, season: nu
 }
 
 export async function getDashboardInsights(timeZone?: string) {
-  const fixtures = await getFixturesByDate(new Date(), timeZone);
+  const resolvedTimeZone = timeZone ?? getDefaultTimeZone();
+  const todayDateKey = getDateInputValueInTimeZone(new Date(), resolvedTimeZone);
+  const fixtures = await getFixturesByDate(todayDateKey, resolvedTimeZone);
   const topFixtures = fixtures.slice(0, 8);
 
   const opportunities = await Promise.all(
@@ -311,7 +321,9 @@ export async function getDashboardInsights(timeZone?: string) {
 }
 
 export async function getTopEdgesByMarket(date = new Date(), timeZone?: string) {
-  const fixtures = await getFixturesByDate(date, timeZone);
+  const resolvedTimeZone = timeZone ?? getDefaultTimeZone();
+  const dateKey = getDateInputValueInTimeZone(date, resolvedTimeZone);
+  const fixtures = await getFixturesByDate(dateKey, resolvedTimeZone);
   const contexts = await Promise.all(
     fixtures.slice(0, 10).map(async (fixture) => ({
       fixture,
@@ -333,38 +345,25 @@ export async function getTopEdgesByMarket(date = new Date(), timeZone?: string) 
 }
 
 type MarketQuery = {
-  startDate: Date;
-  endDate: Date;
+  startDateKey: string;
+  endDateKey: string;
   minOdds?: number;
   maxOdds?: number;
   timeZone?: string;
 };
 
 async function getMarketEntries({
-  startDate,
-  endDate,
+  startDateKey,
+  endDateKey,
   minOdds,
   maxOdds,
   timeZone
 }: MarketQuery) {
-  const dates = enumerateDates(startDate, endDate);
-  const fixturesByDay = await Promise.all(dates.map((date) => getFixturesByDate(date, timeZone)));
-  const startDateKey = format(startDate, "yyyy-MM-dd");
-  const endDateKey = format(endDate, "yyyy-MM-dd");
-  const fixtures = sortFixtures(
-    fixturesByDay
-      .flat()
-      .filter((fixture) =>
-        timeZone
-          ? isFixtureWithinDateRange(
-              fixture.fixture.date,
-              timeZone,
-              startDateKey,
-              endDateKey
-            )
-          : true
-      )
-  ).slice(0, 40);
+  const dates = enumerateDateKeys(startDateKey, endDateKey);
+  const fixturesByDay = await Promise.all(
+    dates.map((dateKey) => getFixturesByDate(dateKey, timeZone))
+  );
+  const fixtures = sortFixtures(dedupeFixtures(fixturesByDay.flat()));
   const contexts = await Promise.all(
     fixtures.map(async (fixture) => ({
       fixture,

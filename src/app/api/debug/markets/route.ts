@@ -25,8 +25,8 @@ export async function GET(request: NextRequest) {
   const maxOdds = maxOddsParam ? Number(maxOddsParam) : undefined;
 
   const groups = await getTopEdgesByMarketRange({
-    startDate: new Date(`${start}T12:00:00`),
-    endDate: new Date(`${end}T12:00:00`),
+    startDateKey: start,
+    endDateKey: end,
     minOdds,
     maxOdds,
     timeZone

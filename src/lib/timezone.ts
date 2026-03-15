@@ -17,6 +17,10 @@ export async function getRequestTimeZone() {
   return cookieStore.get("tz")?.value || DEFAULT_TIME_ZONE;
 }
 
+export function getDefaultTimeZone() {
+  return DEFAULT_TIME_ZONE;
+}
+
 export function getDateInputValueInTimeZone(date: Date, timeZone: string) {
   const formatter = buildFormatter(timeZone, {
     year: "numeric",
@@ -37,6 +41,19 @@ export function getDateInputValueInTimeZone(date: Date, timeZone: string) {
 
 export function getFixtureDateInTimeZone(date: string, timeZone: string) {
   return getDateInputValueInTimeZone(new Date(date), timeZone);
+}
+
+export function shiftDateKey(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  if (!year || !month || !day) {
+    throw new Error(`Invalid date key: ${dateKey}`);
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
 }
 
 export function isFixtureWithinDateRange(

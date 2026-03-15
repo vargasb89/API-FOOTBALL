@@ -36,8 +36,8 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
 
   try {
     groups = await getTopModelProbabilitiesByMarketRange({
-      startDate: new Date(`${start}T12:00:00`),
-      endDate: new Date(`${end}T12:00:00`),
+      startDateKey: start,
+      endDateKey: end,
       minOdds,
       maxOdds,
       timeZone
