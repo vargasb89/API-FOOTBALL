@@ -1,0 +1,121 @@
+import { format } from "date-fns";
+import Link from "next/link";
+
+import { MatchesFiltersForm } from "@/components/filters/matches-filters-form";
+import { Card } from "@/components/ui/card";
+import { SectionTitle } from "@/components/ui/section-title";
+import { getMatchExplorerData } from "@/lib/api-football/service";
+import {
+  findTrackedLeague,
+  getLeagueGroups,
+  type LeagueCategory
+} from "@/lib/competition-scope";
+
+export const dynamic = "force-dynamic";
+
+type MatchExplorerPageProps = {
+  searchParams: Promise<{
+    date?: string;
+    league?: string;
+    season?: string;
+    country?: string;
+    category?: string;
+  }>;
+};
+
+export default async function MatchExplorerPage({
+  searchParams
+}: MatchExplorerPageProps) {
+  const params = await searchParams;
+  const date = params.date ?? format(new Date(), "yyyy-MM-dd");
+  const fixtures = await getMatchExplorerData({
+    date,
+    league: params.league,
+    season: params.season
+  });
+  const leagueGroups = getLeagueGroups();
+
+  const filteredFixtures = fixtures.filter((fixture) => {
+    const byCountry = params.country ? fixture.league.country === params.country : true;
+    const trackedLeague = findTrackedLeague(fixture.league.country, fixture.league.name);
+    const byCategory = params.category
+      ? trackedLeague?.categories.includes(params.category as LeagueCategory)
+      : true;
+
+    return byCountry && byCategory;
+  });
+
+  return (
+    <main className="space-y-6">
+      <SectionTitle
+        eyebrow="Explorador"
+        title="Filtra partidos por fecha, pais y categoria de liga"
+        description="Puedes navegar por las ligas principales, secundarias, ineficientes, de goles o expansion geografica para enfocar mejor la busqueda de value."
+      />
+
+      <Card>
+        <MatchesFiltersForm
+          date={date}
+          league={params.league ?? ""}
+          country={params.country ?? ""}
+          category={params.category ?? ""}
+          season={params.season ?? ""}
+          categoryOptions={leagueGroups.map((group) => ({
+            value: group.key,
+            label: group.label
+          }))}
+        />
+      </Card>
+
+      <div className="grid gap-4">
+        {filteredFixtures.map((fixture) => {
+          const trackedLeague = findTrackedLeague(
+            fixture.league.country,
+            fixture.league.name
+          );
+
+          return (
+            <Card key={fixture.fixture.id}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-400">
+                    {fixture.league.country} • {fixture.league.name} • {fixture.league.season}
+                  </p>
+                  <h3 className="text-xl text-white">
+                    {fixture.teams.home.name} vs {fixture.teams.away.name}
+                  </h3>
+                  <p className="text-sm text-slate-300">
+                    Hora{" "}
+                    {new Date(fixture.fixture.date).toLocaleTimeString("es-CO", {
+                      hour: "2-digit",
+                      minute: "2-digit"
+                    })}{" "}
+                    • Estado {fixture.fixture.status.short}
+                  </p>
+                  {trackedLeague ? (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {trackedLeague.categories.map((category) => (
+                        <span
+                          key={`${fixture.fixture.id}-${category}`}
+                          className="rounded-full border border-white/10 bg-slate-900/60 px-3 py-1 text-xs text-slate-300"
+                        >
+                          {category}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <Link
+                  href={`/matches/${fixture.fixture.id}`}
+                  className="rounded-full border border-white/10 px-4 py-2 text-sm text-white"
+                >
+                  Ver detalle
+                </Link>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </main>
+  );
+}
