@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { MarketFiltersForm } from "@/components/filters/market-filters-form";
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getTopModelProbabilitiesByMarketRange } from "@/lib/api-football/service";
@@ -25,13 +26,22 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
+  let groups: Awaited<ReturnType<typeof getTopModelProbabilitiesByMarketRange>> = [];
+  let runtimeError: string | null = null;
 
-  const groups = await getTopModelProbabilitiesByMarketRange({
-    startDate: new Date(`${start}T12:00:00`),
-    endDate: new Date(`${end}T12:00:00`),
-    minOdds,
-    maxOdds
-  });
+  try {
+    groups = await getTopModelProbabilitiesByMarketRange({
+      startDate: new Date(`${start}T12:00:00`),
+      endDate: new Date(`${end}T12:00:00`),
+      minOdds,
+      maxOdds
+    });
+  } catch (error) {
+    runtimeError =
+      error instanceof Error
+        ? error.message
+        : "No se pudieron calcular las probabilidades.";
+  }
 
   return (
     <main className="space-y-6">
@@ -49,6 +59,13 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
           maxOdds={params.max_odds ?? ""}
         />
       </Card>
+
+      {runtimeError ? (
+        <RuntimeAlert
+          title="Probabilidades no disponibles"
+          message={`La vista cargo, pero no se pudieron recuperar datos del backend. Revisa API_FOOTBALL_KEY y los logs del servidor. Detalle: ${runtimeError}`}
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         {groups.map((group) => (

@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { MatchesFiltersForm } from "@/components/filters/matches-filters-form";
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getMatchExplorerData } from "@/lib/api-football/service";
 import {
@@ -28,11 +29,20 @@ export default async function MatchExplorerPage({
 }: MatchExplorerPageProps) {
   const params = await searchParams;
   const date = params.date ?? format(new Date(), "yyyy-MM-dd");
-  const fixtures = await getMatchExplorerData({
-    date,
-    league: params.league,
-    season: params.season
-  });
+  let fixtures: Awaited<ReturnType<typeof getMatchExplorerData>> = [];
+  let runtimeError: string | null = null;
+
+  try {
+    fixtures = await getMatchExplorerData({
+      date,
+      league: params.league,
+      season: params.season
+    });
+  } catch (error) {
+    runtimeError =
+      error instanceof Error ? error.message : "No se pudo cargar el explorador.";
+  }
+
   const leagueGroups = getLeagueGroups();
 
   const filteredFixtures = fixtures.filter((fixture) => {
@@ -66,6 +76,13 @@ export default async function MatchExplorerPage({
           }))}
         />
       </Card>
+
+      {runtimeError ? (
+        <RuntimeAlert
+          title="Explorador sin datos"
+          message={`La pagina cargo, pero la consulta a la API fallo. Revisa API_FOOTBALL_KEY o los logs del servidor. Detalle: ${runtimeError}`}
+        />
+      ) : null}
 
       <div className="grid gap-4">
         {filteredFixtures.map((fixture) => {

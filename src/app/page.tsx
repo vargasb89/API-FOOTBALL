@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ValueOpportunities } from "@/components/dashboard/value-opportunities";
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getDashboardInsights } from "@/lib/api-football/service";
 import { getLeagueGroups, TRACKED_LEAGUES } from "@/lib/competition-scope";
@@ -10,7 +11,21 @@ import { formatPercent } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const { fixtures, opportunities } = await getDashboardInsights();
+  let fixtures: Awaited<ReturnType<typeof getDashboardInsights>>["fixtures"] = [];
+  let opportunities: Awaited<ReturnType<typeof getDashboardInsights>>["opportunities"] = [];
+  let runtimeError: string | null = null;
+
+  try {
+    const dashboard = await getDashboardInsights();
+    fixtures = dashboard.fixtures;
+    opportunities = dashboard.opportunities;
+  } catch (error) {
+    runtimeError =
+      error instanceof Error
+        ? error.message
+        : "No se pudo cargar el dashboard en este entorno.";
+  }
+
   const leagueGroups = getLeagueGroups();
   const topEdges = opportunities.flatMap((item) => item.offers);
   const averageEdge =
@@ -52,6 +67,12 @@ export default async function HomePage() {
       </section>
 
       <section className="space-y-4">
+        {runtimeError ? (
+          <RuntimeAlert
+            title="Fallo de carga del backend"
+            message={`La interfaz cargo, pero no se pudieron recuperar los datos en tiempo real. Revisa API_FOOTBALL_KEY y los logs del servidor. Detalle: ${runtimeError}`}
+          />
+        ) : null}
         <SectionTitle
           eyebrow="Value Radar"
           title="Oportunidades del dia con comparacion real de probabilidades"

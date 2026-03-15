@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getTeamPageData } from "@/lib/api-football/service";
 import { getEnv } from "@/lib/config/env";
@@ -11,32 +12,48 @@ type TeamPageProps = {
 };
 
 export default async function TeamPage({ params, searchParams }: TeamPageProps) {
-  const env = getEnv();
   const { teamId } = await params;
   const filters = await searchParams;
   const league = Number(filters.league ?? 39);
-  const season = Number(filters.season ?? env.DEFAULT_SEASON);
-  const team = await getTeamPageData(Number(teamId), league, season);
+  let season = Number(filters.season ?? new Date().getFullYear());
+  let team: Awaited<ReturnType<typeof getTeamPageData>> | null = null;
+  let runtimeError: string | null = null;
+
+  try {
+    const env = getEnv();
+    season = Number(filters.season ?? env.DEFAULT_SEASON);
+    team = await getTeamPageData(Number(teamId), league, season);
+  } catch (error) {
+    runtimeError =
+      error instanceof Error ? error.message : "No se pudo cargar el equipo.";
+  }
 
   return (
     <main className="space-y-6">
       <SectionTitle
         eyebrow="Equipo"
-        title={team.statistics?.team.name ?? "Analisis de equipo"}
+        title={team?.statistics?.team.name ?? "Analisis de equipo"}
         description="Seccion para revisar rendimiento de temporada, forma y diferencias local/visitante antes de valorar mercados derivados."
       />
 
+      {runtimeError ? (
+        <RuntimeAlert
+          title="Equipo sin datos"
+          message={`No se pudo cargar la informacion del equipo para liga ${league} y temporada ${season}. Detalle: ${runtimeError}`}
+        />
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Forma reciente" value={team.statistics?.form ?? "-"} />
+        <Metric label="Forma reciente" value={team?.statistics?.form ?? "-"} />
         <Metric
           label="Goles a favor"
-          value={String(team.statistics?.goals?.for?.total?.total ?? "-")}
+          value={String(team?.statistics?.goals?.for?.total?.total ?? "-")}
         />
         <Metric
           label="Goles en contra"
-          value={String(team.statistics?.goals?.against?.total?.total ?? "-")}
+          value={String(team?.statistics?.goals?.against?.total?.total ?? "-")}
         />
-        <Metric label="Posicion" value={String(team.standing?.rank ?? "-")} />
+        <Metric label="Posicion" value={String(team?.standing?.rank ?? "-")} />
       </div>
 
       <Card>
@@ -44,13 +61,13 @@ export default async function TeamPage({ params, searchParams }: TeamPageProps) 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <SplitMetric
             title="Promedio goles a favor"
-            home={team.statistics?.goals?.for?.average?.home ?? "-"}
-            away={team.statistics?.goals?.for?.average?.away ?? "-"}
+            home={team?.statistics?.goals?.for?.average?.home ?? "-"}
+            away={team?.statistics?.goals?.for?.average?.away ?? "-"}
           />
           <SplitMetric
             title="Promedio goles en contra"
-            home={team.statistics?.goals?.against?.average?.home ?? "-"}
-            away={team.statistics?.goals?.against?.average?.away ?? "-"}
+            home={team?.statistics?.goals?.against?.average?.home ?? "-"}
+            away={team?.statistics?.goals?.against?.average?.away ?? "-"}
           />
         </div>
       </Card>

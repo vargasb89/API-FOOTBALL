@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { MarketFiltersForm } from "@/components/filters/market-filters-form";
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getTopEdgesByMarketRange } from "@/lib/api-football/service";
@@ -25,12 +26,20 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
   const end = params.end ?? start;
   const minOdds = params.min_odds ? Number(params.min_odds) : undefined;
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
-  const groups = await getTopEdgesByMarketRange({
-    startDate: new Date(`${start}T12:00:00`),
-    endDate: new Date(`${end}T12:00:00`),
-    minOdds,
-    maxOdds
-  });
+  let groups: Awaited<ReturnType<typeof getTopEdgesByMarketRange>> = [];
+  let runtimeError: string | null = null;
+
+  try {
+    groups = await getTopEdgesByMarketRange({
+      startDate: new Date(`${start}T12:00:00`),
+      endDate: new Date(`${end}T12:00:00`),
+      minOdds,
+      maxOdds
+    });
+  } catch (error) {
+    runtimeError =
+      error instanceof Error ? error.message : "No se pudieron calcular los edges.";
+  }
 
   return (
     <main className="space-y-6">
@@ -48,6 +57,13 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
           maxOdds={params.max_odds ?? ""}
         />
       </Card>
+
+      {runtimeError ? (
+        <RuntimeAlert
+          title="Edges no disponibles"
+          message={`No se pudo construir el ranking con datos en vivo. Revisa la configuracion del backend o los logs del servidor. Detalle: ${runtimeError}`}
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         {groups.map((group) => (

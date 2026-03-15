@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
+import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
 import { getConfidenceLabel } from "@/lib/market-analysis";
 import { getFixtureContext } from "@/lib/api-football/service";
@@ -14,12 +15,26 @@ type MatchDetailPageProps = {
 
 export default async function MatchDetailPage({ params }: MatchDetailPageProps) {
   const { fixtureId } = await params;
-  const context = await getFixtureContext(Number(fixtureId));
+  let context: Awaited<ReturnType<typeof getFixtureContext>> | null = null;
+  let runtimeError: string | null = null;
 
-  if (!context.fixture) {
+  try {
+    context = await getFixtureContext(Number(fixtureId));
+  } catch (error) {
+    runtimeError =
+      error instanceof Error ? error.message : "No se pudo cargar el partido.";
+  }
+
+  if (!context?.fixture) {
     return (
-      <main>
+      <main className="space-y-6">
         <Card>No se encontro el partido solicitado.</Card>
+        {runtimeError ? (
+          <RuntimeAlert
+            title="Detalle sin datos"
+            message={`El backend no pudo construir el contexto del partido. Detalle: ${runtimeError}`}
+          />
+        ) : null}
       </main>
     );
   }
@@ -31,6 +46,13 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
         title={`${context.fixture.teams.home.name} vs ${context.fixture.teams.away.name}`}
         description="Cruce de informacion entre odds reales, probabilidad implicita y probabilidad modelada con datos historicos para aislar value betting."
       />
+
+      {runtimeError ? (
+        <RuntimeAlert
+          title="Contexto parcial"
+          message={`La pagina pudo abrirse, pero hubo errores al recuperar parte del backend. Detalle: ${runtimeError}`}
+        />
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-4">
