@@ -30,6 +30,14 @@ const MARKET_WHITELIST = new Set([
   "Away Team Over/Under"
 ]);
 const MARKET_GROUP_LIMIT = 10;
+const MARKET_CONTEXT_TTL_MS = 60 * 1000;
+
+type MarketContextCacheEntry = {
+  expiresAt: number;
+  offers: ReturnType<typeof extractBestMarketOffers>;
+};
+
+const marketContextCache = new Map<number, MarketContextCacheEntry>();
 
 function sortFixtures(fixtures: FixtureSummary[]) {
   return [...fixtures].sort((left, right) => {
@@ -257,6 +265,62 @@ export async function getFixtureContext(fixtureId: number) {
   };
 }
 
+async function getFixtureMarketOffers(fixture: FixtureSummary) {
+  const cached = marketContextCache.get(fixture.fixture.id);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.offers;
+  }
+
+  const homeTeamId = fixture.teams.home.id;
+  const awayTeamId = fixture.teams.away.id;
+  const season = fixture.league.season;
+  const league = fixture.league.id;
+  const h2h = `${homeTeamId}-${awayTeamId}`;
+
+  const [h2hPayload, oddsPayload, standings, homeStats, awayStats, homeRecentFixtures, awayRecentFixtures] =
+    await Promise.all([
+      apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>("/fixtures/headtohead", {
+        h2h
+      }).catch(() => ({ response: [], errors: [], results: 0 })),
+      apiFootballGet<ApiFootballEnvelope<Array<{ bookmakers: OddsBookmaker[] }>>>(
+        "/odds",
+        { fixture: fixture.fixture.id },
+        120
+      ).catch(() => ({ response: [], errors: [], results: 0 })),
+      getLeagueStandings(league, season),
+      getTeamStatistics(homeTeamId, league, season),
+      getTeamStatistics(awayTeamId, league, season),
+      getRecentTeamFixtures(homeTeamId, season, 20),
+      getRecentTeamFixtures(awayTeamId, season, 20)
+    ]);
+
+  const bookmakers =
+    oddsPayload.response[0]?.bookmakers?.map((bookmaker) => ({
+      ...bookmaker,
+      bets: bookmaker.bets.filter((bet) => MARKET_WHITELIST.has(bet.name))
+    })) ?? [];
+
+  const probabilityModel = buildProbabilityModel({
+    fixture,
+    homeStats,
+    awayStats,
+    homeRecentFixtures,
+    awayRecentFixtures,
+    h2hFixtures: h2hPayload.response,
+    standings
+  });
+
+  const offers = extractBestMarketOffers(bookmakers, probabilityModel);
+
+  marketContextCache.set(fixture.fixture.id, {
+    offers,
+    expiresAt: Date.now() + MARKET_CONTEXT_TTL_MS
+  });
+
+  return offers;
+}
+
 export async function getMatchExplorerData(filters: {
   date: string;
   league?: string;
@@ -306,10 +370,9 @@ export async function getDashboardInsights(timeZone?: string) {
 
   const opportunities = await Promise.all(
     topFixtures.map(async (fixture) => {
-      const context = await getFixtureContext(fixture.fixture.id);
       return {
         fixture,
-        offers: context.marketOffers.slice(0, 2)
+        offers: (await getFixtureMarketOffers(fixture)).slice(0, 2)
       };
     })
   );
@@ -327,12 +390,12 @@ export async function getTopEdgesByMarket(date = new Date(), timeZone?: string) 
   const contexts = await Promise.all(
     fixtures.slice(0, 10).map(async (fixture) => ({
       fixture,
-      context: await getFixtureContext(fixture.fixture.id)
+      marketOffers: await getFixtureMarketOffers(fixture)
     }))
   );
 
-  const entries: MarketLeaderboardEntry[] = contexts.flatMap(({ fixture, context }) =>
-    context.marketOffers.map((offer) => ({
+  const entries: MarketLeaderboardEntry[] = contexts.flatMap(({ fixture, marketOffers }) =>
+    marketOffers.map((offer) => ({
       fixture,
       offer
     }))
@@ -367,12 +430,12 @@ async function getMarketEntries({
   const contexts = await Promise.all(
     fixtures.map(async (fixture) => ({
       fixture,
-      context: await getFixtureContext(fixture.fixture.id)
+      marketOffers: await getFixtureMarketOffers(fixture)
     }))
   );
 
-  const entries: MarketLeaderboardEntry[] = contexts.flatMap(({ fixture, context }) =>
-    context.marketOffers.map((offer) => ({
+  const entries: MarketLeaderboardEntry[] = contexts.flatMap(({ fixture, marketOffers }) =>
+    marketOffers.map((offer) => ({
       fixture,
       offer
     }))
