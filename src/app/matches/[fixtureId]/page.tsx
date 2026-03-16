@@ -41,11 +41,13 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
     );
   }
 
+  const fixture = context.fixture;
+
   return (
     <main className="space-y-6">
       <SectionTitle
         eyebrow="Detalle de partido"
-        title={`${context.fixture.teams.home.name} vs ${context.fixture.teams.away.name}`}
+        title={`${fixture.teams.home.name} vs ${fixture.teams.away.name}`}
         description="Cruce de informacion entre odds reales, probabilidad implicita y probabilidad modelada con datos historicos para aislar value betting."
       />
 
@@ -59,13 +61,13 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="space-y-4">
           <p className="text-sm text-slate-400">
-            {context.fixture.league.name} • {context.fixture.league.country}
+            {fixture.league.name} - {fixture.league.country}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Metric label="Estado" value={context.fixture.fixture.status.short} />
+            <Metric label="Estado" value={fixture.fixture.status.short} />
             <Metric
               label="Hora"
-              value={formatMatchDateTime(context.fixture.fixture.date, timeZone)}
+              value={formatMatchDateTime(fixture.fixture.date, timeZone)}
             />
             <Metric label="Bookmakers" value={String(context.bookmakers.length)} />
             <Metric label="Mercados comparados" value={String(context.marketOffers.length)} />
@@ -146,7 +148,7 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
                   <p className="text-sm text-white">
                     {row.rank}.{" "}
                     <Link
-                      href={`/teams/${row.team.id}?league=${context.fixture.league.id}&season=${context.fixture.league.season}`}
+                      href={`/teams/${row.team.id}?league=${fixture.league.id}&season=${fixture.league.season}`}
                       className="hover:text-emerald-300"
                     >
                       {row.team.name}

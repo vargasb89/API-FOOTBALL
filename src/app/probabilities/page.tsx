@@ -4,8 +4,15 @@ import { MarketFiltersForm } from "@/components/filters/market-filters-form";
 import { Card } from "@/components/ui/card";
 import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
-import { getConfidenceLabel } from "@/lib/market-analysis";
-import { getTopModelProbabilitiesByMarketRange } from "@/lib/api-football/service";
+import {
+  getConfidenceLabel,
+  groupModelProbabilitiesByMarket
+} from "@/lib/market-analysis";
+import {
+  getTopModelProbabilitiesByMarketRange,
+  PartialMarketDataError,
+  SnapshotUnavailableError
+} from "@/lib/api-football/service";
 import {
   formatMatchDateTime,
   getDateInputValueInTimeZone,
@@ -43,10 +50,20 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
       timeZone
     });
   } catch (error) {
-    runtimeError =
-      error instanceof Error
-        ? error.message
-        : "No se pudieron calcular las probabilidades.";
+    if (error instanceof PartialMarketDataError) {
+      groups = groupModelProbabilitiesByMarket(error.entries).map((group) => ({
+        ...group,
+        entries: group.entries.slice(0, 10)
+      }));
+      runtimeError = error.message;
+    } else {
+      runtimeError =
+        error instanceof SnapshotUnavailableError
+          ? `La fecha consultada todavia no tiene snapshot guardado. Carga primero ese rango y luego vuelve a consultar. Detalle: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : "No se pudieron calcular las probabilidades.";
+    }
   }
 
   return (
@@ -70,7 +87,7 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
       {runtimeError ? (
         <RuntimeAlert
           title="Probabilidades no disponibles"
-          message={`La vista cargo, pero no se pudieron recuperar datos del backend. Revisa API_FOOTBALL_KEY y los logs del servidor. Detalle: ${runtimeError}`}
+          message={runtimeError}
         />
       ) : null}
 

@@ -4,8 +4,12 @@ import { MarketFiltersForm } from "@/components/filters/market-filters-form";
 import { Card } from "@/components/ui/card";
 import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
-import { getConfidenceLabel } from "@/lib/market-analysis";
-import { getTopEdgesByMarketRange } from "@/lib/api-football/service";
+import { getConfidenceLabel, groupOffersByMarket } from "@/lib/market-analysis";
+import {
+  getTopEdgesByMarketRange,
+  PartialMarketDataError,
+  SnapshotUnavailableError
+} from "@/lib/api-football/service";
 import {
   formatMatchDateTime,
   getDateInputValueInTimeZone,
@@ -43,8 +47,20 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
       timeZone
     });
   } catch (error) {
-    runtimeError =
-      error instanceof Error ? error.message : "No se pudieron calcular los edges.";
+    if (error instanceof PartialMarketDataError) {
+      groups = groupOffersByMarket(error.entries).map((group) => ({
+        ...group,
+        entries: group.entries.slice(0, 10)
+      }));
+      runtimeError = error.message;
+    } else {
+      runtimeError =
+        error instanceof SnapshotUnavailableError
+          ? `La fecha consultada todavia no tiene snapshot guardado. Carga primero ese rango y luego vuelve a consultar. Detalle: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : "No se pudieron calcular los edges.";
+    }
   }
 
   return (
@@ -68,7 +84,7 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
       {runtimeError ? (
         <RuntimeAlert
           title="Edges no disponibles"
-          message={`No se pudo construir el ranking con datos en vivo. Revisa la configuracion del backend o los logs del servidor. Detalle: ${runtimeError}`}
+          message={runtimeError}
         />
       ) : null}
 

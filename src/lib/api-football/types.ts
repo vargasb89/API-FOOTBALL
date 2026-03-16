@@ -1,5 +1,5 @@
 export type ApiFootballEnvelope<T> = {
-  errors: unknown[];
+  errors: unknown[] | Record<string, string> | null;
   results: number;
   response: T;
 };

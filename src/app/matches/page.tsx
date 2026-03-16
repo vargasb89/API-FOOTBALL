@@ -4,7 +4,10 @@ import { MatchesFiltersForm } from "@/components/filters/matches-filters-form";
 import { Card } from "@/components/ui/card";
 import { RuntimeAlert } from "@/components/ui/runtime-alert";
 import { SectionTitle } from "@/components/ui/section-title";
-import { getMatchExplorerData } from "@/lib/api-football/service";
+import {
+  getMatchExplorerData,
+  SnapshotUnavailableError
+} from "@/lib/api-football/service";
 import {
   findTrackedLeague,
   getLeagueGroups,
@@ -46,7 +49,11 @@ export default async function MatchExplorerPage({
     });
   } catch (error) {
     runtimeError =
-      error instanceof Error ? error.message : "No se pudo cargar el explorador.";
+      error instanceof SnapshotUnavailableError
+        ? `La fecha consultada todavia no tiene snapshot guardado. Carga primero ese dia y luego vuelve a consultar. Detalle: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : "No se pudo cargar el explorador.";
   }
 
   const leagueGroups = getLeagueGroups();
@@ -87,7 +94,7 @@ export default async function MatchExplorerPage({
       {runtimeError ? (
         <RuntimeAlert
           title="Explorador sin datos"
-          message={`La pagina cargo, pero la consulta a la API fallo. Revisa API_FOOTBALL_KEY o los logs del servidor. Detalle: ${runtimeError}`}
+          message={runtimeError}
         />
       ) : null}
 

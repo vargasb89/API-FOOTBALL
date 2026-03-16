@@ -44,6 +44,7 @@ Tablas incluidas:
 
 - `api_cache`: respuestas cacheadas para reducir llamadas repetidas
 - `market_snapshots`: base para guardar mercados y evolucion historica
+- `daily_snapshots`: snapshots diarios por fecha local y zona horaria para estabilizar partidos y rankings
 
 ## Cache y rate limiting
 
@@ -52,6 +53,7 @@ Tablas incluidas:
 - Reuso de PostgreSQL cuando `DATABASE_URL` existe
 - Manejo de `429` con espera usando `retry-after`
 - Pausa ligera si el header de rate limit reporta saldo muy bajo
+- Si `DATABASE_URL` existe, el explorador y los rankings pueden congelar un snapshot diario por fecha local
 
 ## Modulos principales
 
@@ -60,6 +62,28 @@ Tablas incluidas:
 - `/matches/[fixtureId]`: detalle de partido con mercados, tabla y bookmakers
 - `/teams/[teamId]`: estadisticas de temporada y split local/visitante
 - `/calculator`: calculadora de value betting
+
+## Snapshots diarios
+
+Las vistas de explorador y rankings pueden funcionar en modo `snapshot-first`:
+
+1. Cargar una fecha o rango una sola vez contra la API
+2. Guardar fixtures y mercados en PostgreSQL
+3. Reutilizar siempre esa foto desde Neon sin recalcular en vivo
+
+Endpoint manual de carga:
+
+```text
+/api/snapshots/load?start=2026-03-16&end=2026-03-22&timeZone=America/Bogota
+```
+
+Despues de cargar ese rango, puedes consultar:
+
+- `/matches`
+- `/markets`
+- `/probabilities`
+
+sin depender del API en vivo para esas fechas ya guardadas.
 
 ## Estructura
 
@@ -78,3 +102,4 @@ db/
 - La autenticacion usa el header `x-apisports-key`
 - Si no configuras PostgreSQL o Redis, la app sigue funcionando con cache en memoria
 - La pagina de detalle ya filtra mercados foco: 1X2, double chance, over/under, BTTS, team totals y asiaticos basicos
+- Sin PostgreSQL, la app sigue funcionando en vivo y no conserva snapshots entre reinicios

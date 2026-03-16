@@ -15,3 +15,14 @@ create table if not exists market_snapshots (
 );
 
 create index if not exists idx_market_snapshots_fixture_id on market_snapshots (fixture_id);
+
+create table if not exists daily_snapshots (
+  snapshot_type text not null,
+  snapshot_key text not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (snapshot_type, snapshot_key)
+);
+
+create index if not exists idx_daily_snapshots_updated_at on daily_snapshots (updated_at desc);

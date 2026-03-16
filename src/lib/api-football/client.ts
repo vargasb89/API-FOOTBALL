@@ -10,6 +10,28 @@ type CacheEntry = {
 const MIN_TTL_SECONDS = 60;
 const memoryCache = new Map<string, CacheEntry>();
 
+function extractApiFootballError(payload: unknown) {
+  if (!payload || typeof payload !== "object" || !("errors" in payload)) {
+    return null;
+  }
+
+  const { errors } = payload as { errors?: unknown };
+
+  if (Array.isArray(errors)) {
+    return errors.length > 0 ? errors.join(", ") : null;
+  }
+
+  if (errors && typeof errors === "object") {
+    const messages = Object.values(errors).filter(
+      (value): value is string => typeof value === "string" && value.trim().length > 0
+    );
+
+    return messages.length > 0 ? messages.join(", ") : null;
+  }
+
+  return null;
+}
+
 function buildCacheKey(path: string, params: Record<string, string | number>) {
   const search = new URLSearchParams(
     Object.entries(params).map(([key, value]) => [key, String(value)])
@@ -58,6 +80,16 @@ async function writePersistentCache<T>(
   );
 }
 
+async function deletePersistentCache(cacheKey: string) {
+  const redis = getRedis();
+
+  if (redis) {
+    await redis.del(cacheKey);
+  }
+
+  await queryDb("delete from api_cache where cache_key = $1", [cacheKey]);
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -72,16 +104,29 @@ export async function apiFootballGet<T>(
   const inMemory = memoryCache.get(cacheKey);
 
   if (inMemory && inMemory.expiresAt > Date.now()) {
-    return inMemory.value as T;
+    const cachedValue = inMemory.value as T;
+    const cachedError = extractApiFootballError(cachedValue);
+
+    if (!cachedError) {
+      return cachedValue;
+    }
+
+    memoryCache.delete(cacheKey);
   }
 
   const persistent = await readPersistentCache<T>(cacheKey);
   if (persistent) {
-    memoryCache.set(cacheKey, {
-      value: persistent,
-      expiresAt: Date.now() + ttlSeconds * 1000
-    });
-    return persistent;
+    const cachedError = extractApiFootballError(persistent);
+
+    if (cachedError) {
+      await deletePersistentCache(cacheKey);
+    } else {
+      memoryCache.set(cacheKey, {
+        value: persistent,
+        expiresAt: Date.now() + ttlSeconds * 1000
+      });
+      return persistent;
+    }
   }
 
   const url = new URL(`${env.API_FOOTBALL_BASE_URL}${path}`);
@@ -115,6 +160,12 @@ export async function apiFootballGet<T>(
   }
 
   const payload = (await response.json()) as T;
+  const apiError = extractApiFootballError(payload);
+
+  if (apiError) {
+    throw new Error(`API-Football payload error: ${apiError}`);
+  }
+
   memoryCache.set(cacheKey, {
     value: payload,
     expiresAt: Date.now() + ttlSeconds * 1000
