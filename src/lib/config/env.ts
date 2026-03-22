@@ -13,6 +13,7 @@ const envSchema = z.object({
     .default("https://v3.football.api-sports.io"),
   DATABASE_URL: z.string().url().optional(),
   REDIS_URL: z.string().url().optional(),
+  CRON_SECRET: z.string().optional(),
   MAIN_LEAGUE_IDS: z.string().optional(),
   DEFAULT_SEASON: z.coerce.number().default(new Date().getFullYear())
 });
@@ -75,6 +76,7 @@ export function getEnv() {
       process.env.API_FOOTBALL_BASE_URL ?? readEnvFileValue("API_FOOTBALL_BASE_URL");
     const databaseUrl = process.env.DATABASE_URL ?? readEnvFileValue("DATABASE_URL");
     const redisUrl = process.env.REDIS_URL ?? readEnvFileValue("REDIS_URL");
+    const cronSecret = process.env.CRON_SECRET ?? readEnvFileValue("CRON_SECRET");
     const mainLeagueIds =
       process.env.MAIN_LEAGUE_IDS ?? readEnvFileValue("MAIN_LEAGUE_IDS");
     const defaultSeason =
@@ -85,6 +87,7 @@ export function getEnv() {
       API_FOOTBALL_BASE_URL: apiFootballBaseUrl,
       DATABASE_URL: databaseUrl,
       REDIS_URL: redisUrl,
+      CRON_SECRET: cronSecret,
       MAIN_LEAGUE_IDS: mainLeagueIds,
       DEFAULT_SEASON: defaultSeason
     });

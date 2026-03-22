@@ -9,6 +9,9 @@ export async function GET(request: NextRequest) {
   const start = searchParams.get("start");
   const end = searchParams.get("end") ?? start;
   const timeZone = searchParams.get("timeZone") ?? "America/Bogota";
+  const limitPerDate = searchParams.get("limit")
+    ? Number(searchParams.get("limit"))
+    : undefined;
 
   if (!start || !end) {
     return NextResponse.json(
@@ -23,7 +26,8 @@ export async function GET(request: NextRequest) {
     const summary = await loadSnapshotRange({
       startDateKey: start,
       endDateKey: end,
-      timeZone
+      timeZone,
+      limitPerDate
     });
 
     return NextResponse.json({

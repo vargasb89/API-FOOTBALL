@@ -37,6 +37,8 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
   let groups: Awaited<ReturnType<typeof getTopEdgesByMarketRange>> = [];
   let runtimeError: string | null = null;
+  let runtimeTone: "warning" | "info" = "warning";
+  let runtimeTitle = "Edges no disponibles";
 
   try {
     groups = await getTopEdgesByMarketRange({
@@ -53,6 +55,8 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
         entries: group.entries.slice(0, 10)
       }));
       runtimeError = error.message;
+      runtimeTone = "info";
+      runtimeTitle = "Resultados parciales";
     } else {
       runtimeError =
         error instanceof SnapshotUnavailableError
@@ -83,8 +87,9 @@ export default async function MarketEdgesPage({ searchParams }: MarketEdgesPageP
 
       {runtimeError ? (
         <RuntimeAlert
-          title="Edges no disponibles"
+          title={runtimeTitle}
           message={runtimeError}
+          tone={runtimeTone}
         />
       ) : null}
 

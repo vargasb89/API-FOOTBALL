@@ -20,6 +20,7 @@ Variables soportadas:
 - `API_FOOTBALL_BASE_URL` opcional, por defecto `https://v3.football.api-sports.io`
 - `DATABASE_URL` opcional para cache persistente PostgreSQL
 - `REDIS_URL` opcional para cache Redis
+- `CRON_SECRET` opcional para proteger el job de snapshots
 - `MAIN_LEAGUE_IDS` opcional, lista separada por comas
 - `DEFAULT_SEASON` opcional
 
@@ -74,7 +75,7 @@ Las vistas de explorador y rankings pueden funcionar en modo `snapshot-first`:
 Endpoint manual de carga:
 
 ```text
-/api/snapshots/load?start=2026-03-16&end=2026-03-22&timeZone=America/Bogota
+/api/snapshots/load?start=2026-03-16&end=2026-03-22&timeZone=America/Bogota&limit=10
 ```
 
 Despues de cargar ese rango, puedes consultar:
@@ -84,6 +85,26 @@ Despues de cargar ese rango, puedes consultar:
 - `/probabilities`
 
 sin depender del API en vivo para esas fechas ya guardadas.
+
+## Job en segundo plano
+
+La app incluye un job preparado para Vercel Cron:
+
+- Ruta: `/api/cron/snapshots`
+- Configurada en [vercel.json](/C:/Users/USUARIO/OneDrive/Documentos/Playground/vercel.json)
+- Por defecto procesa `hoy + 2 dias`
+- Procesa por lotes pequenos (`limit=10` por fecha) para evitar pegar el rate limit
+
+Puedes ejecutarlo manualmente asi:
+
+```text
+/api/cron/snapshots?timeZone=America/Bogota&daysAhead=2&limit=10
+```
+
+Si defines `CRON_SECRET`, el endpoint exige:
+
+- `Authorization: Bearer <CRON_SECRET>`
+- o `?secret=<CRON_SECRET>`
 
 ## Estructura
 

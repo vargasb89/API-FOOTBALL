@@ -13,6 +13,7 @@ export type MarketKey =
   | "OVER_2_5"
   | "OVER_3_5"
   | "UNDER_3_5"
+  | "FIRST_HALF_OVER_0_5"
   | "HOME_OVER_1_5"
   | "AWAY_OVER_1_5";
 
@@ -41,6 +42,8 @@ type RecentMetrics = {
   conceded: number;
   pointsPerMatch: number;
   totalGoals: number;
+  firstHalfGoals: number;
+  firstHalfOver05Rate: number;
 };
 
 type MarketModelInput = {
@@ -55,6 +58,7 @@ type MarketModelInput = {
 
 export const REQUESTED_MARKETS: MarketKey[] = [
   "BTTS_YES",
+  "FIRST_HALF_OVER_0_5",
   "OVER_1_5",
   "OVER_2_5",
   "OVER_3_5",
@@ -65,6 +69,7 @@ export const REQUESTED_MARKETS: MarketKey[] = [
 
 const LABELS: Record<MarketKey, string> = {
   BTTS_YES: "BTTS",
+  FIRST_HALF_OVER_0_5: "1st Half Over 0.5",
   OVER_1_5: "Over 1.5",
   OVER_2_5: "Over 2.5",
   OVER_3_5: "Over 3.5",
@@ -113,23 +118,31 @@ function getRecentMetrics(teamId: number, fixtures: FixtureSummary[]): RecentMet
       scored: 0,
       conceded: 0,
       pointsPerMatch: 0,
-      totalGoals: 0
+      totalGoals: 0,
+      firstHalfGoals: 0,
+      firstHalfOver05Rate: 0
     };
   }
 
   const scoredValues: number[] = [];
   const concededValues: number[] = [];
   const pointsValues: number[] = [];
+  const firstHalfGoalValues: number[] = [];
+  const firstHalfOver05Values: number[] = [];
 
   fixtures.forEach((fixture) => {
     const isHome = fixture.teams.home.id === teamId;
     const scored = isHome ? fixture.goals.home ?? 0 : fixture.goals.away ?? 0;
     const conceded = isHome ? fixture.goals.away ?? 0 : fixture.goals.home ?? 0;
     const points = scored > conceded ? 3 : scored === conceded ? 1 : 0;
+    const halftimeGoals =
+      (fixture.score?.halftime?.home ?? 0) + (fixture.score?.halftime?.away ?? 0);
 
     scoredValues.push(scored);
     concededValues.push(conceded);
     pointsValues.push(points);
+    firstHalfGoalValues.push(halftimeGoals);
+    firstHalfOver05Values.push(halftimeGoals > 0 ? 1 : 0);
   });
 
   return {
@@ -138,7 +151,9 @@ function getRecentMetrics(teamId: number, fixtures: FixtureSummary[]): RecentMet
     pointsPerMatch: weightedAverage(pointsValues),
     totalGoals: weightedAverage(
       scoredValues.map((scored, index) => scored + (concededValues[index] ?? 0))
-    )
+    ),
+    firstHalfGoals: weightedAverage(firstHalfGoalValues),
+    firstHalfOver05Rate: weightedAverage(firstHalfOver05Values)
   };
 }
 
@@ -225,7 +240,12 @@ function getMarketConfidence({
   const centralityPenalty = Math.abs(modeledProbability - 0.5);
   const probabilityScore = 1 - clamp(centralityPenalty / 0.5, 0, 1) * 0.55;
   const marketBoost =
-    key === "BTTS_YES" || key === "OVER_2_5" || key === "OVER_3_5" ? 0.08 : 0;
+    key === "BTTS_YES" ||
+    key === "OVER_2_5" ||
+    key === "OVER_3_5" ||
+    key === "FIRST_HALF_OVER_0_5"
+      ? 0.08
+      : 0;
 
   return clamp(edgeScore * 0.55 + probabilityScore * 0.45 + marketBoost, 0, 1);
 }
@@ -374,6 +394,19 @@ export function buildProbabilityModel({
       .map((item) => (item.goals.home ?? 0) + (item.goals.away ?? 0))
       .filter((value) => Number.isFinite(value))
   );
+  const h2hFirstHalfGoals = average(
+    h2hFixtures
+      .slice(0, 6)
+      .map((item) => (item.score?.halftime?.home ?? 0) + (item.score?.halftime?.away ?? 0))
+      .filter((value) => Number.isFinite(value))
+  );
+  const h2hFirstHalfOver05Rate = average(
+    h2hFixtures
+      .slice(0, 6)
+      .map((item) =>
+        ((item.score?.halftime?.home ?? 0) + (item.score?.halftime?.away ?? 0)) > 0 ? 1 : 0
+      )
+  );
   const scoringEnvironment = clamp(
     average(
       [
@@ -392,8 +425,24 @@ export function buildProbabilityModel({
   let over25 = 0;
   let over35 = 0;
   let under35 = 0;
+  let firstHalfOver05 = 0;
   let homeOver15 = 0;
   let awayOver15 = 0;
+  const firstHalfShare = clamp(0.44 + (profile.totalGoalsLean - 1) * 0.08, 0.4, 0.5);
+  const historicalFirstHalfGoals = average(
+    [homeRecent.firstHalfGoals, awayRecent.firstHalfGoals, h2hFirstHalfGoals].filter(
+      (value) => value > 0
+    )
+  );
+  const firstHalfLambda = clamp(
+    blendProbability(
+      (lambdaHome + lambdaAway) * firstHalfShare,
+      historicalFirstHalfGoals || (lambdaHome + lambdaAway) * firstHalfShare,
+      0.38
+    ),
+    0.45,
+    2.4
+  );
 
   for (let homeGoals = 0; homeGoals <= 7; homeGoals += 1) {
     for (let awayGoals = 0; awayGoals <= 7; awayGoals += 1) {
@@ -417,6 +466,18 @@ export function buildProbabilityModel({
   }
 
   const directOver15 = clamp(1 - Math.exp(-scoringEnvironment) * (1 + scoringEnvironment), 0, 0.985);
+  const directFirstHalfOver05 = clamp(1 - Math.exp(-firstHalfLambda), 0, 0.94);
+  const historicalFirstHalfOver05 = clamp(
+    average(
+      [
+        homeRecent.firstHalfOver05Rate,
+        awayRecent.firstHalfOver05Rate,
+        h2hFirstHalfOver05Rate
+      ].filter((value) => value > 0)
+    ) || directFirstHalfOver05,
+    0,
+    0.98
+  );
   const directOver25 = clamp(
     1 -
       Math.exp(-scoringEnvironment) *
@@ -458,11 +519,16 @@ export function buildProbabilityModel({
     0,
     0.9
   );
+  firstHalfOver05 = blendProbability(directFirstHalfOver05, historicalFirstHalfOver05, 0.52);
 
   return {
     BTTS_YES: normalizeProbability(
       blendProbability(bttsYes, directBttsYes, 0.42),
       profile.bttsBias
+    ),
+    FIRST_HALF_OVER_0_5: normalizeProbability(
+      firstHalfOver05,
+      clamp(profile.over15Bias * 1.05, 0.96, 1.16)
     ),
     OVER_1_5: normalizeProbability(
       blendProbability(over15, directOver15, 0.72),
@@ -501,15 +567,30 @@ function getMarketKey(marketName: string, selectionValue: string): MarketKey | n
     if (value === "under 3.5") return "UNDER_3_5";
   }
 
+  if (
+    (marketName === "First Half Goals Over/Under" ||
+      marketName === "1st Half Goals Over/Under" ||
+      marketName === "Goals Over/Under First Half") &&
+    value === "over 0.5"
+  ) {
+    return "FIRST_HALF_OVER_0_5";
+  }
+
   if (marketName === "Both Teams Score" && value === "yes") {
     return "BTTS_YES";
   }
 
-  if (marketName === "Home Team Over/Under" && value === "over 1.5") {
+  if (
+    (marketName === "Home Team Over/Under" || marketName === "Total - Home") &&
+    value === "over 1.5"
+  ) {
     return "HOME_OVER_1_5";
   }
 
-  if (marketName === "Away Team Over/Under" && value === "over 1.5") {
+  if (
+    (marketName === "Away Team Over/Under" || marketName === "Total - Away") &&
+    value === "over 1.5"
+  ) {
     return "AWAY_OVER_1_5";
   }
 

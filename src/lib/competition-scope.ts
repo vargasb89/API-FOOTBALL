@@ -206,6 +206,12 @@ export const TRACKED_LEAGUES: TrackedLeague[] = [
     categories: ["AsiaOceania"]
   },
   {
+    country: "China",
+    name: "Super League",
+    label: "China Super League",
+    categories: ["AsiaOceania"]
+  },
+  {
     country: "Australia",
     name: "A-League",
     label: "Australia A-League",

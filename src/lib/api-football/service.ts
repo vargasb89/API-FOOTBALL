@@ -10,6 +10,7 @@ import type {
 import { isTrackedLeague } from "@/lib/competition-scope";
 import { getMainLeagueIds } from "@/lib/config/env";
 import { queryDb } from "@/lib/db";
+import { readModelCache, writeModelCache } from "@/lib/model-cache";
 import { readDailySnapshot, writeDailySnapshot } from "@/lib/snapshots";
 import {
   getDateInputValueInTimeZone,
@@ -30,13 +31,24 @@ const MARKET_WHITELIST = new Set([
   "Goals Over/Under",
   "Both Teams Score",
   "Home Team Over/Under",
-  "Away Team Over/Under"
+  "Away Team Over/Under",
+  "Total - Home",
+  "Total - Away",
+  "First Half Goals Over/Under",
+  "1st Half Goals Over/Under",
+  "Goals Over/Under First Half"
 ]);
 const MARKET_GROUP_LIMIT = 10;
 const FIXTURE_SNAPSHOT_TYPE = "fixtures_by_local_day";
-const MARKET_SNAPSHOT_TYPE = "market_entries_by_local_day";
+const MARKET_SNAPSHOT_VERSION = "v4";
+const MARKET_SNAPSHOT_TYPE = `market_entries_by_local_day_${MARKET_SNAPSHOT_VERSION}`;
 const SNAPSHOT_CONTEXT_CONCURRENCY = 1;
-const FIXTURE_MARKET_SNAPSHOT_PREFIX = "fixture_market_offers";
+const FIXTURE_MARKET_SNAPSHOT_PREFIX = `fixture_market_offers_${MARKET_SNAPSHOT_VERSION}`;
+const LEAGUE_STANDINGS_CACHE = "league_standings";
+const TEAM_STATISTICS_CACHE = "team_statistics";
+const TEAM_RECENT_FIXTURES_CACHE = "team_recent_fixtures";
+const H2H_FIXTURES_CACHE = "head_to_head";
+const FIXTURE_ODDS_CACHE = "fixture_odds_v2";
 
 export class SnapshotUnavailableError extends Error {
   constructor(message: string) {
@@ -61,6 +73,17 @@ type MarketSnapshotCaches = {
   recentFixtures: Map<string, FixtureSummary[]>;
   h2h: Map<string, FixtureSummary[]>;
 };
+
+function summarizeFailures(
+  failures: string[],
+  label: string
+) {
+  const preview = failures.slice(0, 3).join(" | ");
+  const remaining = failures.length - 3;
+  const suffix = remaining > 0 ? ` | +${remaining} ${label} adicionales` : "";
+
+  return `${failures.length} ${label} pendientes. ${preview}${suffix}`;
+}
 
 function hasUsableSnapshot<T>(payload: T[] | null): payload is T[] {
   return Array.isArray(payload) && payload.length > 0;
@@ -93,6 +116,31 @@ function buildSnapshotKey(dateKey: string, timeZone?: string) {
   return `${timeZone ?? getDefaultTimeZone()}::${dateKey}`;
 }
 
+function buildLeagueStandingsCacheKey(league: number, season: number) {
+  return `${league}-${season}`;
+}
+
+function buildTeamStatisticsCacheKey(team: number, league: number, season: number) {
+  return `${team}-${league}-${season}`;
+}
+
+function buildTeamRecentFixturesCacheKey(
+  team: number,
+  season: number,
+  last: number,
+  league?: number
+) {
+  return `${team}-${season}-${last}-${league ?? "all"}`;
+}
+
+function buildHeadToHeadCacheKey(h2h: string) {
+  return h2h;
+}
+
+function buildFixtureOddsCacheKey(fixtureId: number) {
+  return String(fixtureId);
+}
+
 function buildFixtureMarketSnapshotName(dateKey: string, timeZone?: string) {
   return `${FIXTURE_MARKET_SNAPSHOT_PREFIX}::${buildSnapshotKey(dateKey, timeZone)}`;
 }
@@ -112,7 +160,33 @@ async function readFixtureMarketEntries(
     [fixtureId, buildFixtureMarketSnapshotName(dateKey, timeZone)]
   );
 
-  return rows?.[0]?.payload ?? null;
+  const payload = rows?.[0]?.payload ?? null;
+  return hasUsableSnapshot(payload) ? payload : null;
+}
+
+async function readFixtureMarketEntriesMap(
+  fixtureIds: number[],
+  dateKey: string,
+  timeZone?: string
+) {
+  if (!fixtureIds.length) {
+    return new Map<number, MarketOffer[]>();
+  }
+
+  const rows = await queryDb<{ fixture_id: number; payload: MarketOffer[] }>(
+    `select distinct on (fixture_id) fixture_id, payload
+     from market_snapshots
+     where fixture_id = any($1::bigint[])
+       and market_name = $2
+     order by fixture_id, created_at desc`,
+    [fixtureIds, buildFixtureMarketSnapshotName(dateKey, timeZone)]
+  );
+
+  return new Map(
+    (rows ?? [])
+      .filter((row) => hasUsableSnapshot(row.payload))
+      .map((row) => [Number(row.fixture_id), row.payload])
+  );
 }
 
 async function writeFixtureMarketEntries(
@@ -121,7 +195,7 @@ async function writeFixtureMarketEntries(
   payload: MarketOffer[],
   timeZone?: string
 ) {
-  if (!payload.length) {
+  if (!hasUsableSnapshot(payload)) {
     return;
   }
 
@@ -203,7 +277,8 @@ async function fetchAndStoreFixturesByDate(dateKey: string, timeZone?: string) {
   const filteredFixtures = sortFixtures(
     fixtures.filter((fixture) => {
       const matchesLeague = mainLeagueIds.length
-        ? mainLeagueIds.includes(fixture.league.id)
+        ? mainLeagueIds.includes(fixture.league.id) ||
+          isTrackedLeague(fixture.league.country, fixture.league.name)
         : isTrackedLeague(fixture.league.country, fixture.league.name);
       const matchesLocalDate = resolvedTimeZone
         ? getFixtureDateInTimeZone(fixture.fixture.date, resolvedTimeZone) === dateKey
@@ -270,21 +345,44 @@ function filterEntriesByOdds(
 }
 
 export async function getLeagueStandings(league: number, season: number) {
+  const cacheKey = buildLeagueStandingsCacheKey(league, season);
+  const cached = await readModelCache<StandingRow[]>(LEAGUE_STANDINGS_CACHE, cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
   const payload = await apiFootballGet<
     ApiFootballEnvelope<Array<{ league: { standings: StandingRow[][] } }>>
   >("/standings", { league, season }, 300);
 
-  return payload.response[0]?.league.standings[0] ?? [];
+  const standings = payload.response[0]?.league.standings[0] ?? [];
+  await writeModelCache(LEAGUE_STANDINGS_CACHE, cacheKey, standings);
+
+  return standings;
 }
 
 export async function getTeamStatistics(team: number, league: number, season: number) {
+  const cacheKey = buildTeamStatisticsCacheKey(team, league, season);
+  const cached = await readModelCache<TeamStatistics | null>(
+    TEAM_STATISTICS_CACHE,
+    cacheKey
+  );
+
+  if (cached) {
+    return cached;
+  }
+
   const payload = await apiFootballGet<ApiFootballEnvelope<TeamStatistics>>(
     "/teams/statistics",
     { team, league, season },
     300
   );
 
-  return payload.response ?? null;
+  const statistics = payload.response ?? null;
+  await writeModelCache(TEAM_STATISTICS_CACHE, cacheKey, statistics);
+
+  return statistics;
 }
 
 export async function getRecentTeamFixtures(
@@ -293,6 +391,16 @@ export async function getRecentTeamFixtures(
   last = 20,
   league?: number
 ) {
+  const cacheKey = buildTeamRecentFixturesCacheKey(team, season, last, league);
+  const cached = await readModelCache<FixtureSummary[]>(
+    TEAM_RECENT_FIXTURES_CACHE,
+    cacheKey
+  );
+
+  if (cached) {
+    return sortFixtures(cached);
+  }
+
   const params: Record<string, string | number> = {
     team,
     season,
@@ -309,7 +417,55 @@ export async function getRecentTeamFixtures(
     300
   );
 
-  return sortFixtures(payload.response);
+  const fixtures = sortFixtures(payload.response);
+  await writeModelCache(TEAM_RECENT_FIXTURES_CACHE, cacheKey, fixtures);
+
+  return fixtures;
+}
+
+async function getHeadToHeadFixtures(h2h: string) {
+  const cacheKey = buildHeadToHeadCacheKey(h2h);
+  const cached = await readModelCache<FixtureSummary[]>(H2H_FIXTURES_CACHE, cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
+    "/fixtures/headtohead",
+    { h2h }
+  );
+  const fixtures = payload.response;
+  await writeModelCache(H2H_FIXTURES_CACHE, cacheKey, fixtures);
+
+  return fixtures;
+}
+
+async function getFixtureOddsBookmakers(fixtureId: number) {
+  const cacheKey = buildFixtureOddsCacheKey(fixtureId);
+  const cached = await readModelCache<OddsBookmaker[]>(FIXTURE_ODDS_CACHE, cacheKey);
+
+  if (hasUsableSnapshot(cached)) {
+    return cached;
+  }
+
+  const oddsPayload = await apiFootballGet<ApiFootballEnvelope<Array<{ bookmakers: OddsBookmaker[] }>>>(
+    "/odds",
+    { fixture: fixtureId },
+    120
+  ).catch(() => ({ response: [], errors: [], results: 0 }));
+
+  const bookmakers =
+    oddsPayload.response[0]?.bookmakers?.map((bookmaker) => ({
+      ...bookmaker,
+      bets: bookmaker.bets.filter((bet) => MARKET_WHITELIST.has(bet.name))
+    })) ?? [];
+
+  if (hasUsableSnapshot(bookmakers)) {
+    await writeModelCache(FIXTURE_ODDS_CACHE, cacheKey, bookmakers);
+  }
+
+  return bookmakers;
 }
 
 async function buildFixtureContext(fixture: FixtureSummary | undefined, fixtureId: number) {
@@ -317,34 +473,20 @@ async function buildFixtureContext(fixture: FixtureSummary | undefined, fixtureI
   const awayTeamId = fixture?.teams.away.id;
   const h2h = homeTeamId && awayTeamId ? `${homeTeamId}-${awayTeamId}` : "";
 
-  const [statsPayload, h2hPayload, lineupPayload, injuryPayload, oddsPayload] =
+  const [statsPayload, h2hFixtures, lineupPayload, injuryPayload, bookmakers] =
     await Promise.all([
       apiFootballGet<ApiFootballEnvelope<FixtureStatisticsRow[]>>("/fixtures/statistics", {
         fixture: fixtureId
       }),
-      h2h
-        ? apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>("/fixtures/headtohead", {
-            h2h
-          })
-        : Promise.resolve({ response: [], errors: [], results: 0 }),
+      h2h ? getHeadToHeadFixtures(h2h) : Promise.resolve([]),
       apiFootballGet<ApiFootballEnvelope<unknown[]>>("/fixtures/lineups", {
         fixture: fixtureId
       }).catch(() => ({ response: [], errors: [], results: 0 })),
       apiFootballGet<ApiFootballEnvelope<unknown[]>>("/injuries", {
         fixture: fixtureId
       }).catch(() => ({ response: [], errors: [], results: 0 })),
-      apiFootballGet<ApiFootballEnvelope<Array<{ bookmakers: OddsBookmaker[] }>>>(
-        "/odds",
-        { fixture: fixtureId },
-        120
-      ).catch(() => ({ response: [], errors: [], results: 0 }))
+      getFixtureOddsBookmakers(fixtureId)
     ]);
-
-  const bookmakers =
-    oddsPayload.response[0]?.bookmakers?.map((bookmaker) => ({
-      ...bookmaker,
-      bets: bookmaker.bets.filter((bet) => MARKET_WHITELIST.has(bet.name))
-    })) ?? [];
 
   const season = fixture?.league.season;
   const league = fixture?.league.id;
@@ -367,7 +509,7 @@ async function buildFixtureContext(fixture: FixtureSummary | undefined, fixtureI
           awayStats,
           homeRecentFixtures,
           awayRecentFixtures,
-          h2hFixtures: h2hPayload.response,
+          h2hFixtures,
           standings
         })
       : null;
@@ -378,7 +520,7 @@ async function buildFixtureContext(fixture: FixtureSummary | undefined, fixtureI
   return {
     fixture,
     statistics: statsPayload.response,
-    h2h: h2hPayload.response,
+    h2h: h2hFixtures,
     lineups: lineupPayload.response,
     injuries: injuryPayload.response,
     bookmakers,
@@ -409,7 +551,7 @@ async function buildMarketSnapshotContext(
   const awayRecentKey = `${awayTeamId}-${season}`;
 
   const [
-    oddsPayload,
+    bookmakers,
     standings,
     homeStats,
     awayStats,
@@ -417,11 +559,7 @@ async function buildMarketSnapshotContext(
     awayRecentFixtures,
     h2hFixtures
   ] = await Promise.all([
-    apiFootballGet<ApiFootballEnvelope<Array<{ bookmakers: OddsBookmaker[] }>>>(
-      "/odds",
-      { fixture: fixtureId },
-      120
-    ).catch(() => ({ response: [], errors: [], results: 0 })),
+    getFixtureOddsBookmakers(fixtureId),
     (async () => {
       if (!caches.standings.has(standingsKey)) {
         caches.standings.set(standingsKey, await getLeagueStandings(league, season));
@@ -459,22 +597,12 @@ async function buildMarketSnapshotContext(
     })(),
     (async () => {
       if (!caches.h2h.has(h2hKey)) {
-        const payload = await apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>(
-          "/fixtures/headtohead",
-          { h2h: h2hKey }
-        );
-        caches.h2h.set(h2hKey, payload.response);
+        caches.h2h.set(h2hKey, await getHeadToHeadFixtures(h2hKey));
       }
 
       return caches.h2h.get(h2hKey) ?? [];
     })()
   ]);
-
-  const bookmakers =
-    oddsPayload.response[0]?.bookmakers?.map((bookmaker) => ({
-      ...bookmaker,
-      bets: bookmaker.bets.filter((bet) => MARKET_WHITELIST.has(bet.name))
-    })) ?? [];
 
   const probabilityModel = buildProbabilityModel({
     fixture,
@@ -507,15 +635,16 @@ async function buildAndStoreMarketEntriesByDate(
     } satisfies MarketSnapshotCaches);
   const entries: MarketLeaderboardEntry[] = [];
   const failures: string[] = [];
+  const fixtureEntriesMap = await readFixtureMarketEntriesMap(
+    fixtures.map((fixture) => fixture.fixture.id),
+    dateKey,
+    resolvedTimeZone
+  );
 
   for (const fixture of fixtures) {
-    const cachedFixtureOffers = await readFixtureMarketEntries(
-      fixture.fixture.id,
-      dateKey,
-      resolvedTimeZone
-    );
+    const cachedFixtureOffers = fixtureEntriesMap.get(fixture.fixture.id) ?? null;
 
-    if (hasUsableSnapshot(cachedFixtureOffers)) {
+    if (cachedFixtureOffers !== null) {
       entries.push(
         ...cachedFixtureOffers.map((offer) => ({
           fixture,
@@ -553,13 +682,13 @@ async function buildAndStoreMarketEntriesByDate(
   if (failures.length) {
     if (entries.length) {
       throw new PartialMarketDataError(
-        `Se guardaron mercados parciales para ${dateKey}. Fixtures pendientes: ${failures.join(" | ")}`,
+        `Se guardaron mercados parciales para ${dateKey}. ${summarizeFailures(failures, "fixtures")}`,
         entries
       );
     }
 
     throw new SnapshotUnavailableError(
-      `No se pudieron construir mercados para ${dateKey}. Fixtures pendientes: ${failures.join(" | ")}`
+      `No se pudieron construir mercados para ${dateKey}. ${summarizeFailures(failures, "fixtures")}`
     );
   }
 
@@ -694,6 +823,16 @@ async function getMarketEntries({
       continue;
     }
 
+    const rebuiltEntries = await rebuildDailyMarketSnapshotFromFixtureSnapshots(
+      dateKey,
+      resolvedTimeZone
+    );
+
+    if (rebuiltEntries.length) {
+      entriesByDay.push(rebuiltEntries);
+      continue;
+    }
+
     try {
       const builtEntries = await buildAndStoreMarketEntriesByDate(
         dateKey,
@@ -718,18 +857,200 @@ async function getMarketEntries({
 
   if (!filteredEntries.length && failures.length) {
     throw new SnapshotUnavailableError(
-      `No se pudieron obtener mercados para el rango solicitado. ${failures.join(" | ")}`
+      `No se pudieron obtener mercados para el rango solicitado. ${summarizeFailures(
+        failures,
+        "fechas"
+      )}`
     );
   }
 
   if (filteredEntries.length && failures.length) {
     throw new PartialMarketDataError(
-      `Se muestran resultados parciales. Fechas no cargadas: ${failures.join(" | ")}`,
+      `Se muestran resultados parciales. ${summarizeFailures(failures, "fechas")}`,
       filteredEntries
     );
   }
 
   return filteredEntries;
+}
+
+export type MarketDiagnostics = {
+  market: string;
+  label: string;
+  totalEntries: number;
+  positiveEdges: number;
+  maxModeledProbability: number | null;
+  maxEdge: number | null;
+  sample: Array<{
+    fixtureId: number;
+    match: string;
+    bookmaker: string;
+    odds: number;
+    modeledProbability: number;
+    edge: number;
+  }>;
+};
+
+export async function getMarketDiagnosticsRange(query: MarketQuery) {
+  const entries = await getMarketEntries(query);
+
+  return groupModelProbabilitiesByMarket(entries).map((group) => {
+    const positiveEdges = group.entries.filter((entry) => entry.offer.edge > 0).length;
+    const maxModeledProbability = group.entries.length
+      ? Math.max(...group.entries.map((entry) => entry.offer.modeledProbability))
+      : null;
+    const maxEdge = group.entries.length
+      ? Math.max(...group.entries.map((entry) => entry.offer.edge))
+      : null;
+
+    return {
+      market: group.market,
+      label: group.label,
+      totalEntries: group.entries.length,
+      positiveEdges,
+      maxModeledProbability,
+      maxEdge,
+      sample: group.entries.slice(0, 5).map((entry) => ({
+        fixtureId: entry.fixture.fixture.id,
+        match: `${entry.fixture.teams.home.name} vs ${entry.fixture.teams.away.name}`,
+        bookmaker: entry.offer.bookmaker,
+        odds: entry.offer.odds,
+        modeledProbability: entry.offer.modeledProbability,
+        edge: entry.offer.edge
+      }))
+    } satisfies MarketDiagnostics;
+  });
+}
+
+function isRateLimitError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("too many requests") || message.includes("rate limit");
+}
+
+async function collectStoredMarketEntriesByDate(
+  fixtures: FixtureSummary[],
+  dateKey: string,
+  timeZone?: string
+) {
+  const storedMap = await readFixtureMarketEntriesMap(
+    fixtures.map((fixture) => fixture.fixture.id),
+    dateKey,
+    timeZone
+  );
+
+  return fixtures.flatMap((fixture) =>
+    (storedMap.get(fixture.fixture.id) ?? []).map((offer) => ({
+      fixture,
+      offer
+    }))
+  );
+}
+
+async function rebuildDailyMarketSnapshotFromFixtureSnapshots(
+  dateKey: string,
+  timeZone?: string
+) {
+  const resolvedTimeZone = timeZone ?? getDefaultTimeZone();
+  const fixtures = await getFixturesByDate(dateKey, resolvedTimeZone, {
+    requireSnapshot: true
+  });
+  const aggregatedEntries = await collectStoredMarketEntriesByDate(
+    fixtures,
+    dateKey,
+    resolvedTimeZone
+  );
+
+  if (aggregatedEntries.length) {
+    await writeDailySnapshot(
+      MARKET_SNAPSHOT_TYPE,
+      buildSnapshotKey(dateKey, resolvedTimeZone),
+      aggregatedEntries
+    );
+  }
+
+  return aggregatedEntries;
+}
+
+export async function processMarketSnapshotBatch(params: {
+  dateKey: string;
+  timeZone?: string;
+  limit?: number;
+}) {
+  const resolvedTimeZone = params.timeZone ?? getDefaultTimeZone();
+  const limit = Math.max(1, params.limit ?? 10);
+  const fixtures = await getFixturesByDate(params.dateKey, resolvedTimeZone);
+  const storedMap = await readFixtureMarketEntriesMap(
+    fixtures.map((fixture) => fixture.fixture.id),
+    params.dateKey,
+    resolvedTimeZone
+  );
+  const pendingFixtures = fixtures.filter(
+    (fixture) => !storedMap.has(fixture.fixture.id)
+  );
+  const caches: MarketSnapshotCaches = {
+    standings: new Map<string, StandingRow[]>(),
+    teamStats: new Map<string, TeamStatistics | null>(),
+    recentFixtures: new Map<string, FixtureSummary[]>(),
+    h2h: new Map<string, FixtureSummary[]>()
+  };
+  const failures: string[] = [];
+  let processedInRun = 0;
+
+  for (const fixture of pendingFixtures.slice(0, limit)) {
+    try {
+      const marketOffers = await buildMarketSnapshotContext(fixture, caches);
+      await writeFixtureMarketEntries(
+        fixture.fixture.id,
+        params.dateKey,
+        marketOffers,
+        resolvedTimeZone
+      );
+      processedInRun += 1;
+    } catch (error) {
+      failures.push(
+        `${fixture.fixture.id}: ${error instanceof Error ? error.message : "No se pudo calcular el mercado"}`
+      );
+
+      if (isRateLimitError(error)) {
+        break;
+      }
+    }
+  }
+
+  const aggregatedEntries = await collectStoredMarketEntriesByDate(
+    fixtures,
+    params.dateKey,
+    resolvedTimeZone
+  );
+
+  await writeDailySnapshot(
+    MARKET_SNAPSHOT_TYPE,
+    buildSnapshotKey(params.dateKey, resolvedTimeZone),
+    aggregatedEntries
+  );
+
+  const remainingMap = await readFixtureMarketEntriesMap(
+    fixtures.map((fixture) => fixture.fixture.id),
+    params.dateKey,
+    resolvedTimeZone
+  );
+  const pendingCount = fixtures.filter(
+    (fixture) => !remainingMap.has(fixture.fixture.id)
+  ).length;
+
+  return {
+    dateKey: params.dateKey,
+    fixtures: fixtures.length,
+    processedInRun,
+    storedFixtures: remainingMap.size,
+    pendingFixtures: pendingCount,
+    marketEntries: aggregatedEntries.length,
+    failures
+  };
 }
 
 export async function getTopEdgesByMarketRange(query: MarketQuery) {
@@ -753,29 +1074,36 @@ export async function loadSnapshotRange(params: {
   startDateKey: string;
   endDateKey: string;
   timeZone?: string;
+  limitPerDate?: number;
 }) {
   const resolvedTimeZone = params.timeZone ?? getDefaultTimeZone();
   const dates = enumerateDateKeys(params.startDateKey, params.endDateKey);
-  const caches = {
-    standings: new Map<string, StandingRow[]>(),
-    teamStats: new Map<string, TeamStatistics | null>(),
-    recentFixtures: new Map<string, FixtureSummary[]>(),
-    h2h: new Map<string, FixtureSummary[]>()
-  };
   const summary: Array<{
     dateKey: string;
     fixtures: number;
     marketEntries: number;
+    processedInRun: number;
+    storedFixtures: number;
+    pendingFixtures: number;
+    failures: string[];
   }> = [];
 
   for (const dateKey of dates) {
-    const fixtures = await fetchAndStoreFixturesByDate(dateKey, resolvedTimeZone);
-    const entries = await buildAndStoreMarketEntriesByDate(dateKey, resolvedTimeZone, caches);
+    await getFixturesByDate(dateKey, resolvedTimeZone);
+    const batch = await processMarketSnapshotBatch({
+      dateKey,
+      timeZone: resolvedTimeZone,
+      limit: params.limitPerDate
+    });
 
     summary.push({
       dateKey,
-      fixtures: fixtures.length,
-      marketEntries: entries.length
+      fixtures: batch.fixtures,
+      marketEntries: batch.marketEntries,
+      processedInRun: batch.processedInRun,
+      storedFixtures: batch.storedFixtures,
+      pendingFixtures: batch.pendingFixtures,
+      failures: batch.failures
     });
   }
 

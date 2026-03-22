@@ -26,3 +26,14 @@ create table if not exists daily_snapshots (
 );
 
 create index if not exists idx_daily_snapshots_updated_at on daily_snapshots (updated_at desc);
+
+create table if not exists model_cache (
+  cache_type text not null,
+  cache_key text not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (cache_type, cache_key)
+);
+
+create index if not exists idx_model_cache_updated_at on model_cache (updated_at desc);

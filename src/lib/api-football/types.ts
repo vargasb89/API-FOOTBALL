@@ -23,14 +23,15 @@ export type FixtureSummary = {
     home: { id: number; name: string; logo?: string; winner?: boolean };
     away: { id: number; name: string; logo?: string; winner?: boolean };
   };
-  goals: {
-    home: number | null;
-    away: number | null;
+    goals: {
+      home: number | null;
+      away: number | null;
+    };
+    score?: {
+      halftime?: { home: number | null; away: number | null };
+      fulltime?: { home: number | null; away: number | null };
+    };
   };
-  score?: {
-    fulltime?: { home: number | null; away: number | null };
-  };
-};
 
 export type FixtureStatisticsRow = {
   team: { id: number; name: string; logo?: string };

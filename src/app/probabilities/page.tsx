@@ -40,6 +40,8 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
   const maxOdds = params.max_odds ? Number(params.max_odds) : undefined;
   let groups: Awaited<ReturnType<typeof getTopModelProbabilitiesByMarketRange>> = [];
   let runtimeError: string | null = null;
+  let runtimeTone: "warning" | "info" = "warning";
+  let runtimeTitle = "Probabilidades no disponibles";
 
   try {
     groups = await getTopModelProbabilitiesByMarketRange({
@@ -56,6 +58,8 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
         entries: group.entries.slice(0, 10)
       }));
       runtimeError = error.message;
+      runtimeTone = "info";
+      runtimeTitle = "Resultados parciales";
     } else {
       runtimeError =
         error instanceof SnapshotUnavailableError
@@ -86,8 +90,9 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
 
       {runtimeError ? (
         <RuntimeAlert
-          title="Probabilidades no disponibles"
+          title={runtimeTitle}
           message={runtimeError}
+          tone={runtimeTone}
         />
       ) : null}
 
