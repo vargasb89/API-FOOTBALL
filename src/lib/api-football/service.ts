@@ -7,7 +7,13 @@ import type {
   StandingRow,
   TeamStatistics
 } from "@/lib/api-football/types";
-import { isTrackedLeague } from "@/lib/competition-scope";
+import {
+  TRACKED_LEAGUES,
+  findTrackedLeague,
+  findTrackedLeagueByName,
+  isTrackedLeague,
+  type LeagueCategory
+} from "@/lib/competition-scope";
 import { getMainLeagueIds } from "@/lib/config/env";
 import { queryDb } from "@/lib/db";
 import { readModelCache, writeModelCache } from "@/lib/model-cache";
@@ -87,6 +93,22 @@ function summarizeFailures(
 
 function hasUsableSnapshot<T>(payload: T[] | null): payload is T[] {
   return Array.isArray(payload) && payload.length > 0;
+}
+
+function hasUsableModelCache<T>(payload: T | null | undefined) {
+  if (payload == null) {
+    return false;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.length > 0;
+  }
+
+  if (typeof payload === "object") {
+    return Object.keys(payload).length > 0;
+  }
+
+  return true;
 }
 
 function sortFixtures(fixtures: FixtureSummary[]) {
@@ -250,6 +272,34 @@ async function fetchFixturesForApiDate(dateKey: string) {
   return payload.response;
 }
 
+async function fetchFixturesForTrackedLeagueByDate(
+  trackedLeagueId: number,
+  dateKey: string,
+  season?: string,
+  timeZone?: string
+) {
+  const inferredSeason = season ?? dateKey.slice(0, 4);
+  const resolvedTimeZone = timeZone ?? getDefaultTimeZone();
+  const apiDateKeys = getApiDateKeysForLocalDate(dateKey, resolvedTimeZone);
+  const payloads = await Promise.all(
+    apiDateKeys.map((apiDateKey) =>
+      apiFootballGet<ApiFootballEnvelope<FixtureSummary[]>>("/fixtures", {
+        date: apiDateKey,
+        league: trackedLeagueId,
+        season: inferredSeason
+      })
+    )
+  );
+
+  return sortFixtures(
+    dedupeFixtures(payloads.flatMap((payload) => payload.response)).filter(
+      (fixture) =>
+        getFixtureDateInTimeZone(fixture.fixture.date, resolvedTimeZone) === dateKey &&
+        isActionableFixture(fixture)
+    )
+  );
+}
+
 function getApiDateKeysForLocalDate(dateKey: string, timeZone?: string) {
   if (!timeZone) {
     return [dateKey];
@@ -348,7 +398,7 @@ export async function getLeagueStandings(league: number, season: number) {
   const cacheKey = buildLeagueStandingsCacheKey(league, season);
   const cached = await readModelCache<StandingRow[]>(LEAGUE_STANDINGS_CACHE, cacheKey);
 
-  if (cached) {
+  if (Array.isArray(cached) && cached.length > 0) {
     return cached;
   }
 
@@ -369,7 +419,7 @@ export async function getTeamStatistics(team: number, league: number, season: nu
     cacheKey
   );
 
-  if (cached) {
+  if (cached && Object.keys(cached).length > 0) {
     return cached;
   }
 
@@ -397,7 +447,7 @@ export async function getRecentTeamFixtures(
     cacheKey
   );
 
-  if (cached) {
+  if (Array.isArray(cached) && cached.length > 0) {
     return sortFixtures(cached);
   }
 
@@ -427,7 +477,7 @@ async function getHeadToHeadFixtures(h2h: string) {
   const cacheKey = buildHeadToHeadCacheKey(h2h);
   const cached = await readModelCache<FixtureSummary[]>(H2H_FIXTURES_CACHE, cacheKey);
 
-  if (cached) {
+  if (Array.isArray(cached) && cached.length > 0) {
     return cached;
   }
 
@@ -724,6 +774,110 @@ export async function getMatchExplorerData(filters: {
         (!filters.league || String(fixture.league.id) === filters.league) &&
         (!filters.season || String(fixture.league.season) === filters.season)
     )
+  );
+}
+
+export async function getLeagueModelViewData(filters: {
+  date: string;
+  league?: string;
+  season?: string;
+  country?: string;
+  category?: string;
+  timeZone?: string;
+}) {
+  const resolvedTimeZone = filters.timeZone ?? getDefaultTimeZone();
+  const selectedTrackedLeague =
+    filters.league && filters.country
+      ? findTrackedLeague(filters.country, filters.league)
+      : filters.league
+        ? findTrackedLeagueByName(filters.league)
+        : undefined;
+  const filterFixtures = (fixtures: FixtureSummary[]) =>
+    fixtures.filter((fixture) => {
+      const bySeason = filters.season
+        ? String(fixture.league.season) === filters.season
+        : true;
+      const trackedLeague = findTrackedLeague(fixture.league.country, fixture.league.name);
+      const byCountry = selectedTrackedLeague
+        ? trackedLeague?.country === selectedTrackedLeague.country
+        : filters.country
+          ? fixture.league.country === filters.country
+          : true;
+      const byLeague = selectedTrackedLeague
+        ? trackedLeague?.country === selectedTrackedLeague.country &&
+          trackedLeague?.name === selectedTrackedLeague.name
+        : filters.league
+          ? fixture.league.name === filters.league ||
+            String(fixture.league.id) === filters.league
+          : true;
+      const byCategory = filters.category
+        ? trackedLeague?.categories.includes(filters.category as LeagueCategory)
+        : true;
+
+      return bySeason && byCountry && byLeague && byCategory;
+    });
+
+  const initialFixtures = await getMatchExplorerData({
+    date: filters.date,
+    season: filters.season,
+    timeZone: resolvedTimeZone
+  });
+
+  let filteredFixtures = filterFixtures(initialFixtures);
+
+  if (!filteredFixtures.length && selectedTrackedLeague?.id) {
+    const leagueFixtures = await fetchFixturesForTrackedLeagueByDate(
+      selectedTrackedLeague.id,
+      filters.date,
+      filters.season,
+      resolvedTimeZone
+    );
+    filteredFixtures = filterFixtures(leagueFixtures);
+  }
+
+  if (!filteredFixtures.length) {
+    const refreshedFixtures = await fetchAndStoreFixturesByDate(filters.date, resolvedTimeZone);
+    filteredFixtures = filterFixtures(refreshedFixtures);
+  }
+
+  const contexts = await Promise.allSettled(
+    filteredFixtures.map(async (fixture) => {
+      const context = await getFixtureContext(fixture.fixture.id, fixture);
+      return {
+        fixture,
+        offers: [...context.marketOffers].sort(
+          (left, right) =>
+            right.modeledProbability - left.modeledProbability || right.edge - left.edge
+        )
+      };
+    })
+  );
+
+  return Promise.all(
+    contexts.map(async (result, index) => {
+      const fixture = filteredFixtures[index];
+
+      if (result.status === "fulfilled") {
+        return {
+          fixture,
+          trackedLeague: findTrackedLeague(fixture.league.country, fixture.league.name),
+          offers: result.value.offers
+        };
+      }
+
+      const storedOffers =
+        (await readFixtureMarketEntries(fixture.fixture.id, filters.date, resolvedTimeZone)) ??
+        [];
+
+      return {
+        fixture,
+        trackedLeague: findTrackedLeague(fixture.league.country, fixture.league.name),
+        offers: [...storedOffers].sort(
+          (left, right) =>
+            right.modeledProbability - left.modeledProbability || right.edge - left.edge
+        )
+      };
+    })
   );
 }
 

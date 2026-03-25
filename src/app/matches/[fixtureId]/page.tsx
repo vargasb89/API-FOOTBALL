@@ -139,7 +139,7 @@ export default async function MatchDetailPage({ params }: MatchDetailPageProps) 
         <Card>
           <h3 className="text-lg font-semibold text-white">Tabla de clasificacion</h3>
           <div className="mt-4 space-y-3">
-            {context.standings.slice(0, 8).map((row) => (
+            {(context.standings ?? []).slice(0, 8).map((row) => (
               <div
                 key={row.team.id}
                 className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/50 px-4 py-3"

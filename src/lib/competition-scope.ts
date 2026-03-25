@@ -7,10 +7,12 @@ export type LeagueCategory =
   | "AsiaOceania";
 
 export type TrackedLeague = {
+  id?: number;
   country: string;
   name: string;
   label: string;
   categories: LeagueCategory[];
+  aliases?: string[];
 };
 
 export type LeagueProfile = {
@@ -170,10 +172,33 @@ export const TRACKED_LEAGUES: TrackedLeague[] = [
     categories: ["America"]
   },
   {
+    id: 72,
+    country: "Brazil",
+    name: "Serie B",
+    label: "Brazil Serie B",
+    categories: ["America", "Secundarias"]
+  },
+  {
+    id: 128,
     country: "Argentina",
-    name: "Primera Division",
-    label: "Argentina Primera Division",
-    categories: ["America"]
+    name: "Liga Profesional Argentina",
+    label: "Argentina Primera",
+    categories: ["America"],
+    aliases: ["Primera Division", "Argentina Primera Division"]
+  },
+  {
+    id: 129,
+    country: "Argentina",
+    name: "Primera Nacional",
+    label: "Argentina Primera Nacional",
+    categories: ["America", "Secundarias"]
+  },
+  {
+    id: 131,
+    country: "Argentina",
+    name: "Primera B Metropolitana",
+    label: "Argentina Primera B Metropolitana",
+    categories: ["America", "Secundarias"]
   },
   {
     country: "Colombia",
@@ -206,6 +231,7 @@ export const TRACKED_LEAGUES: TrackedLeague[] = [
     categories: ["AsiaOceania"]
   },
   {
+    id: 169,
     country: "China",
     name: "Super League",
     label: "China Super League",
@@ -237,15 +263,29 @@ function normalize(value: string) {
     .trim();
 }
 
+function matchesTrackedLeagueName(league: TrackedLeague, name: string) {
+  const normalizedName = normalize(name);
+  const names = [league.name, ...(league.aliases ?? [])];
+
+  return names.some((candidate) => normalize(candidate) === normalizedName);
+}
+
 export function findTrackedLeague(country: string, name: string) {
   const normalizedCountry = normalize(country);
-  const normalizedName = normalize(name);
 
   return TRACKED_LEAGUES.find(
-    (league) =>
-      normalize(league.country) === normalizedCountry &&
-      normalize(league.name) === normalizedName
+    (league) => {
+      if (normalize(league.country) !== normalizedCountry) {
+        return false;
+      }
+
+      return matchesTrackedLeagueName(league, name);
+    }
   );
+}
+
+export function findTrackedLeagueByName(name: string) {
+  return TRACKED_LEAGUES.find((league) => matchesTrackedLeagueName(league, name));
 }
 
 export function isTrackedLeague(country: string, name: string) {

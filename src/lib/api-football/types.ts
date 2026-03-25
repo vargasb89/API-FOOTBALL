@@ -1,6 +1,10 @@
 export type ApiFootballEnvelope<T> = {
   errors: unknown[] | Record<string, string> | null;
   results: number;
+  paging?: {
+    current: number;
+    total: number;
+  };
   response: T;
 };
 

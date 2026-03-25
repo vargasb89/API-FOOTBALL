@@ -63,7 +63,7 @@ export default async function ProbabilityPage({ searchParams }: ProbabilityPageP
     } else {
       runtimeError =
         error instanceof SnapshotUnavailableError
-          ? `La fecha consultada todavia no tiene snapshot guardado. Carga primero ese rango y luego vuelve a consultar. Detalle: ${error.message}`
+          ? `No se pudo construir el snapshot para la fecha consultada. Se intentó cargar desde el API y no se completó. Detalle: ${error.message}`
           : error instanceof Error
             ? error.message
             : "No se pudieron calcular las probabilidades.";

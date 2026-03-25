@@ -6,6 +6,7 @@ import { TimeZoneSync } from "@/components/layout/time-zone-sync";
 const links = [
   { href: "/", label: "Dashboard" },
   { href: "/matches", label: "Explorador" },
+  { href: "/league-models", label: "Ver ligas" },
   { href: "/markets", label: "Edges" },
   { href: "/probabilities", label: "Probabilidades" },
   { href: "/calculator", label: "Calculadora" }
